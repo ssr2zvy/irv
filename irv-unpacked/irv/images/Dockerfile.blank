@@ -1,0 +1,9 @@
+FROM python:3.12-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends bash git curl ca-certificates tini util-linux procps && rm -rf /var/lib/apt/lists/* && useradd -m -u 1000 -s /bin/bash dev
+WORKDIR /opt/irv
+COPY agent/requirements.txt ./requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+COPY agent/agent.py ./agent.py
+COPY images/entrypoint.sh ./entrypoint.sh
+RUN chmod 755 entrypoint.sh && python3 -c 'import os,json;json.dump([{"root":"image","path":p} for p,d,f in os.walk("/opt")]+[{"root":"image","path":p} for p in ["/usr/bin","/usr/local/bin","/tmp"]],open("image-tree.json","w"))'
+ENTRYPOINT ["/usr/bin/tini","--","/opt/irv/entrypoint.sh"]

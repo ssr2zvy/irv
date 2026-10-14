@@ -1,0 +1,1 @@
+The Fly Machines API baseline was retrieved from https://docs.machines.dev/openapi.json during implementation. It is retained for compatibility comparison with its upstream definitions and notices intact. Official references: https://docs.fly.io/machines/api/machines-resource/ and https://docs.fly.io/machines/api/apps-resource/ .

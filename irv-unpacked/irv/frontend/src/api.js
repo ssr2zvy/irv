@@ -1,0 +1,3 @@
+export async function api(path,method='GET',body){const r=await fetch('/api'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json','X-Irv-Request':'1'},body:body===undefined?undefined:JSON.stringify(body)});const text=await r.text();let data;try{data=JSON.parse(text)}catch{data={error:'Unexpected server response'}}if(!r.ok)throw new Error(data.error||`Request failed (${r.status})`);return data;}
+export const parse = (s,fallback)=>{try{return JSON.parse(s)}catch{return fallback}};
+export function remaining(ts,now=Date.now()){if(!ts)return '—';const s=Math.max(0,Math.ceil((ts-now)/1000));return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}

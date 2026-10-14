@@ -1,0 +1,1 @@
+CREATE TABLE metrics (id VARCHAR(40) PRIMARY KEY, payload TEXT NOT NULL, created BIGINT NOT NULL);

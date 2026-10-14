@@ -1,0 +1,1 @@
+{"name":"irv","version":"0.1.0","private":true,"type":"module","scripts":{"dev":"vite --host 0.0.0.0","build":"vite build","test":"node --test test/*.test.js"},"dependencies":{"@iarna/toml":"2.2.5","@xterm/addon-fit":"0.10.0","@xterm/xterm":"5.5.0","qrcode":"1.5.4","react":"19.1.1","react-dom":"19.1.1"},"devDependencies":{"@vitejs/plugin-react":"5.0.4","vite":"7.3.7"}}
