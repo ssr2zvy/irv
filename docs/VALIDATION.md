@@ -1,6 +1,6 @@
 # Validation record
 
-Prepared for this distribution on 2026-10-14 UTC.
+Original distribution validation record, prepared on 2026-10-14 UTC. The results below describe the original local verification; they are not a new test run for the workflow-removal patch.
 
 ## Executed successfully
 
@@ -17,15 +17,15 @@ Prepared for this distribution on 2026-10-14 UTC.
 - Actual Fly Machine provisioning, volume retention/deletion, suspend/resume, region capacity and billing reconciliation.
 - Actual Tigris S3 requests and account-level policies.
 - Twilio SMS delivery/checks.
-- Docker image builds, Trivy image scans, or GitHub-hosted scheduled/deployment workflows (Docker and account credentials were not available in this execution environment).
+- Docker image builds or Trivy image scans (Docker and account credentials were not available in the original execution environment). The original scheduled/deployment workflows were not validated there and have since been removed.
 - A visual browser inspection of the UI. The production bundle and real HTTP/WebSocket paths were exercised, but screenshots/accessibility audits were not performed.
 
-The supplied `scripts/live_smoke.py` and workflow gates are for credentialed staging validation. They do not substitute for testing failure recovery under your actual cloud configuration. Live canaries currently verify startup/PTY/write/save; full provider volume/suspend and destructive-recreation exercises must additionally be run before relying on those modes in production.
+The supplied `scripts/live_smoke.py` is available for manual credentialed staging validation. It does not substitute for testing failure recovery under your actual cloud configuration. Live canaries currently verify startup/PTY/write/save; full provider volume/suspend and destructive-recreation exercises must additionally be run before relying on those modes in production.
 
 ## Explicit scope limits
 
 - One control-plane replica. Distributed locking/routing is not implemented.
-- Cold-start image deployment is automatic after passing maintenance. Arbitrary breaking API fixes, unpatchable vulnerabilities, and all behavioral regressions cannot be repaired autonomously.
+- Automatic sandbox-image maintenance and Fly API integration updates are deferred and not implemented. Operators can build and validate images and manually select digest-pinned image references; these apply at the next cold Machine creation.
 - The optimizer learns return timing and conservative transition-duration bounds. It does not use an LLM, paid randomized exploration, time-of-day features, or a direct reinforcement-learning policy.
 - Volume retention/deletion is optimized when a volume exists; working medium at creation is an operator setting. Live migration into a newly created volume is not optimized by this release.
 - The 180-second limit is an enforced planning constraint and startup failure deadline, not an infrastructure availability guarantee.

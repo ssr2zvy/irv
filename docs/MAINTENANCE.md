@@ -1,37 +1,56 @@
-# Automatic maintenance
+# Environment maintenance: deferred
 
-Included from the initial version:
+The requested daily environment-maintenance worker is **not implemented**. Its
+requirements are recorded in the fully commented Java source file
+`backend/src/main/java/dev/irv/EnvironmentMaintenanceWorker.java`.
 
-- `.github/workflows/ci.yml`: unit/integration tests, local backend-agent smoke, UI build, and Docker builds.
-- `maintenance.yml`: daily clean base-image rebuilds, SBOM, Trivy checks, current Fly OpenAPI compatibility checks, immutable candidate publication, staging canary, then production catalog promotion.
-- `.github/dependabot.yml`: daily Java, npm, Python, image, and GitHub Action dependency checks.
-- `dependency-merge.yml`: enables auto-merge for Dependabot patch/minor changes only. **Configure branch protection requiring the test job first.** Without that gate, do not enable auto-merge. Major upgrades remain reviewable PRs.
-- `deploy.yml`: after successful main-branch CI, deploy the backend to staging, run credentialed smoke, and deploy the passed commit to production.
-- `renovate.json`: optional alternative to Dependabot; enable only one dependency-update bot.
-- Backend daily cleanup for old logs, sessions, snapshots, and unreferenced chunks.
+The future irv worker must check the components of both predefined sandbox
+images (blank and Java/frontend) for vulnerabilities and available updates,
+apply necessary updates and rebuild the affected images, and monitor relevant
+Fly API changes and make the necessary Machine-management integration updates.
 
-## One-time GitHub setup
+The GitHub workflow substitute has been removed. The repository no longer
+includes the maintenance, dependency auto-merge, or deployment workflows, nor
+Dependabot/Renovate version-update configuration. The previously deleted CI
+workflow has not been restored. No scheduler or automatic updater is enabled
+by the commented source file.
 
-Push this repository to GitHub; enable Actions, Dependabot, branch protection and auto-merge. Give the workflow permission to publish GHCR packages. Publish sandbox packages so Fly can pull them, or provide a supported private-registry mechanism separately.
+## Existing runtime maintenance
 
-Configure these Actions secrets:
+`Maintenance.java` remains active for snapshot/chunk retention, expired logs
+and sessions, provider metrics, and container-log collection. These operations
+serve the running app and are separate from the deferred environment updater.
+The lifecycle cost optimizer is also unchanged.
 
-- `IRV_SMOKE_ORIGIN`: HTTPS URL of a staging irv backend.
-- `IRV_SMOKE_USERNAME`, `IRV_SMOKE_PASSWORD`, `IRV_SMOKE_TOTP`: dedicated staging account with authenticator secret. Do not use a human administrator account.
-- `IRV_STAGING_MAINTENANCE_TOKEN`: matches staging `IRV_MAINTENANCE_TOKEN`.
-- `IRV_PRODUCTION_ORIGIN`, `IRV_PRODUCTION_MAINTENANCE_TOKEN`: production promotion endpoint and matching token.
-- `FLY_DEPLOY_TOKEN`, `IRV_STAGING_APP`, `IRV_PRODUCTION_APP`: backend deployment.
+## Manual environment updates
 
-The staging instance must already have working Fly, database and Tigris configuration. The tests create billable canaries, then archive them after verified saving. Run cleanup manually if a workflow is interrupted before its finally block. Provision a separate staging organization where possible.
+Until the worker is implemented, an operator must update the image recipes and
+components, build and publish images, validate them, and select the new digests.
+See [Deployment](DEPLOYMENT.md) for image build/push commands and backend
+deployment. `scripts/live_smoke.py` can be run manually against staging; it
+creates billable sandbox resources.
 
-## What promotion means
+The existing `POST /maintenance/promote` endpoint and `scripts/promote.py` are
+manual tools. The endpoint checks the token and digest format and records image
+references in the database; it does not run scans, tests, or rebuilds itself.
 
-Successful maintenance updates the backend's image catalog with digest-pinned references. The new images are used at the next cold creation. Existing active or suspended environments continue on their current image until recreated; the worker does not interrupt active development or change a running user's filesystem.
+To select a tested pair of images, create `blank-digest.txt` and
+`java-digest.txt` in your current working directory. Each file must contain the
+full published reference, such as `ghcr.io/OWNER/irv-blank@sha256:...`.
+Set `MAINTENANCE_TOKEN` in your protected shell environment to the target
+backend's `IRV_MAINTENANCE_TOKEN`, then run:
 
-Failed scans or canaries block production promotion. GitHub marks the workflow failed and retains test/SBOM/schema artifacts. Fixable HIGH/CRITICAL vulnerabilities block promotion. Unfixed vulnerabilities are visible in reports; rebuilding cannot invent a patch.
+```sh
+python3 scripts/promote.py https://YOUR_IRV_BACKEND
+```
 
-The API checker compares endpoint presence and newly required schema fields. A breaking API change blocks updates for adapter review. It does not synthesize arbitrary correct Java fixes. The live smoke detects integration issues that schema comparison misses. A false-positive schema change requires a reviewed baseline update to `contracts/fly-openapi.json`.
+The database catalog overrides the initial `IRV_BLANK_IMAGE` and
+`IRV_JAVA_IMAGE` environment values. The selected pair applies at the next
+cold Machine creation; this command does not replace a running or retained
+Machine. To select a previous pair, repeat the same manual operation with the
+previous image references. Keep the user workspace, configuration, and scripts
+under the existing verified-save lifecycle.
 
-Rollback: promote the previous recorded pair of image digests using `scripts/promote.py`. Backend rollout uses Fly health checks; a successfully deployed version with a later behavioral regression requires explicit rollback to its prior image. Autonomous diagnosis/rollback of every future behavioral regression is not implemented.
-
-GitHub's scheduled execution is the daily worker; no ChatGPT reminder or external scheduled task is needed. These workflows are packaged, not installed into your account by downloading the ZIP.
+`scripts/check_fly_contract.py` and `contracts/fly-openapi.json` remain available
+for manual compatibility checks. They compare API definitions; they do not
+modify the Java integration or implement automatic Fly API updates.

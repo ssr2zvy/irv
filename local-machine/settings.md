@@ -41,15 +41,8 @@ Image catalog promotion can override initial image references in the database; s
 
 The 180-second total startup deadline and initial 180-second idle grace are code policies, not environment settings. Idle grace adapts through the optimizer; startup remains capped. Pricing inputs are stored through Administration, not environment variables. See [algorithm](../docs/ALGORITHM.md).
 
-## GitHub Actions configuration
+## Manual staging validation
 
-The current workflows read these non-secret values from **Actions secrets**, so configure them there without changing their names:
-
-| Name | Value |
-| --- | --- |
-| `IRV_SMOKE_ORIGIN` | Staging app HTTPS origin. |
-| `IRV_PRODUCTION_ORIGIN` | Production app HTTPS origin. |
-| `IRV_STAGING_APP` | Staging Fly control-plane app name. |
-| `IRV_PRODUCTION_APP` | Production Fly control-plane app name. |
+Set `IRV_SMOKE_ORIGIN` to the staging backend's HTTPS origin in the operator shell running `scripts/live_smoke.py`. Its login credentials are listed in [tokens.md](tokens.md). No GitHub Actions settings are required by this repository after removal of the update and deployment workflows.
 
 Credentials are listed in [tokens.md](tokens.md). Agent-internal environment variables are set by irv; users configure their own environment through the restricted [workspace TOML](../docs/CONFIGURATION.md).

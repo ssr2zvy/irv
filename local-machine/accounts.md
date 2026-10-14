@@ -7,7 +7,7 @@ Record resource identifiers here after provisioning. Keep passwords, tokens, inv
 | Fly.io | [Fly dashboard](https://fly.io/dashboard) | Account/organization owner, `FLY_ORG`, staging and production app names, region |
 | Tigris | [Tigris console](https://console.tigris.dev/) or the Fly storage dashboard | Bucket per environment, owning account, whether billing is through Fly |
 | PostgreSQL | Your selected provider | Project/cluster name, database name, region, backup owner; connection settings in deployment configuration |
-| GitHub | Your irv repository → Settings / Actions / Packages | Repository owner/name, package names, staging/production workflow configuration |
+| GitHub | Your irv repository / Packages | Repository owner/name and published image package names; no bundled update or deployment workflows |
 | Twilio (optional) | [Twilio Console](https://console.twilio.com/) | Account/project and Verify service owner |
 | Domain/DNS | Your registrar and DNS dashboards | App domain, separate preview domain, DNS provider, renewal owner |
 

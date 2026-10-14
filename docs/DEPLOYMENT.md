@@ -23,9 +23,11 @@ docker push ghcr.io/YOUR_ACCOUNT/irv-blank:v1
 docker push ghcr.io/YOUR_ACCOUNT/irv-java:v1
 ```
 
-Set `IRV_BLANK_IMAGE` and `IRV_JAVA_IMAGE` to immutable `registry/repo@sha256:...` references. The daily promotion endpoint requires digests. Use images Fly can pull; public GHCR packages are simplest. Private registry authentication is not configured by this ZIP's Fly adapter.
+Set `IRV_BLANK_IMAGE` and `IRV_JAVA_IMAGE` to immutable `registry/repo@sha256:...` references. The manual image-catalog endpoint requires digests. Use images Fly can pull; public GHCR packages are simplest. Private registry authentication is not configured by this ZIP's Fly adapter.
 
 ## Deploy the control plane
+
+Deployment is an operator action; no GitHub deployment workflow is included. The environment-maintenance worker is deferred, so image and Fly integration updates also require manual work until it is implemented.
 
 1. Generate `.env` using `scripts/init_env.py`, then fill in service credentials.
 2. Create the Fly control-plane app and PostgreSQL database using your preferred provisioning workflow.

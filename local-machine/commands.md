@@ -77,4 +77,4 @@ With the four `IRV_SMOKE_*` values set in a protected shell environment:
 python3 scripts/live_smoke.py
 ```
 
-This creates billable canaries. If interrupted, inspect staging resources for cleanup. Image build/push commands are in [deployment](../docs/DEPLOYMENT.md); candidate promotion and rollback are in [maintenance](../docs/MAINTENANCE.md).
+This creates billable canaries. If interrupted, inspect staging resources for cleanup. Image build/push commands are in [deployment](../docs/DEPLOYMENT.md); manual image selection and rollback are in [maintenance](../docs/MAINTENANCE.md). These commands do not run on a schedule; the environment-maintenance worker is deferred.

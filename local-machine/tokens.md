@@ -1,6 +1,6 @@
 # Tokens
 
-Never commit credential values. Store each credential in the secret system used by its consumer. For local runs use the Git-ignored root `.env`; for production use backend Fly secrets; for automation use GitHub Actions secrets. None belong in browser code or user sandbox configuration.
+Never commit credential values. Store each credential in the secret system used by its consumer. For local runs use the Git-ignored root `.env`; for production use backend Fly secrets. For manual operator scripts use a protected shell environment. None belong in browser code or user sandbox configuration.
 
 ## Fly sandbox-management token
 
@@ -10,13 +10,9 @@ Never commit credential values. Store each credential in the secret system used 
 
 **Storage and use:** Backend Fly secrets; root `.env` for local cloud-backed testing. It needs access to the organization in `FLY_ORG` and the dynamically created sandbox apps. A token limited to deploying the control-plane app is insufficient. Sandbox agents receive their own generated credential, never this token.
 
-## Fly backend-deployment token
+## Manual backend deployment
 
-**Name:** `FLY_DEPLOY_TOKEN`
-
-**Purpose:** Deploys the staging and production control-plane apps from GitHub Actions.
-
-**Storage and use:** GitHub Actions secret. `deploy.yml` maps this to the Fly CLI's `FLY_API_TOKEN` environment variable inside the deployment steps. Its authorization must cover both configured apps. This is separate from the backend's sandbox-management token.
+Use your authenticated Fly CLI operator identity, or set the Fly CLI's `FLY_API_TOKEN` in a protected operator shell with access to the target app. The removed workflow's `FLY_DEPLOY_TOKEN` Actions secret is no longer consumed. Keep deployment credentials separate from the backend's sandbox-management token.
 
 ## Tigris access keys
 
@@ -58,9 +54,9 @@ Changing the variable or restarting does not renew an existing expired bootstrap
 
 **Name:** `IRV_MAINTENANCE_TOKEN`
 
-**Purpose:** Authorizes promotion of tested image digests through the maintenance endpoint.
+**Purpose:** Authorizes manual selection of image digests through the maintenance endpoint. The endpoint does not test or scan images itself.
 
-**Storage and use:** Backend Fly secrets; generated in root `.env` locally. Use distinct values for staging and production. Store the matching copies in Actions as `IRV_STAGING_MAINTENANCE_TOKEN` and `IRV_PRODUCTION_MAINTENANCE_TOKEN`. Workflows pass these to the promotion script as `MAINTENANCE_TOKEN`.
+**Storage and use:** Backend Fly secrets; generated in root `.env` locally. Use distinct values for staging and production. For a manual image-catalog change, supply the target backend's value as `MAINTENANCE_TOKEN` in the operator shell running `scripts/promote.py`. No matching GitHub Actions secrets are required.
 
 ## SMS verification — optional
 
@@ -74,22 +70,14 @@ Changing the variable or restarting does not renew an existing expired bootstrap
 
 **Names:** `IRV_SMOKE_USERNAME`, `IRV_SMOKE_PASSWORD`, `IRV_SMOKE_TOTP`
 
-**Purpose:** Allow automated staging login and sandbox lifecycle checks.
+**Purpose:** Allow the manually invoked `scripts/live_smoke.py` to log in and check the sandbox lifecycle.
 
-**Storage and use:** GitHub Actions secrets. Use a dedicated staging account. `IRV_SMOKE_TOTP` is its enrolled Base32 authenticator secret, not a six-digit code. Anyone with the password and this secret can authenticate as that account.
+**Storage and use:** Protected operator shell environment. Also set `IRV_SMOKE_ORIGIN` to the staging backend URL. Use a dedicated staging account. `IRV_SMOKE_TOTP` is its enrolled Base32 authenticator secret, not a six-digit code. Anyone with the password and this secret can authenticate as that account.
 
-## GitHub workflow token
+## Removed workflow configuration
 
-**Name:** `GITHUB_TOKEN`
-
-**Purpose:** Repository automation and GHCR publication.
-
-**Storage and use:** Supplied automatically by GitHub Actions with the workflow's declared permissions. Do not manually add a same-named repository secret. Configure the repository permissions and required checks described in [maintenance](../docs/MAINTENANCE.md).
-
-## Workflow settings stored as Actions secrets
-
-The included workflows also read `IRV_SMOKE_ORIGIN`, `IRV_PRODUCTION_ORIGIN`, `IRV_STAGING_APP`, and `IRV_PRODUCTION_APP` through `secrets.*`. These are URLs/names rather than secret credentials, but put them in Actions secrets to match the implementation. See [settings.md](settings.md).
+The removed workflows no longer consume `FLY_DEPLOY_TOKEN`, `IRV_STAGING_MAINTENANCE_TOKEN`, `IRV_PRODUCTION_MAINTENANCE_TOKEN`, `IRV_PRODUCTION_ORIGIN`, `IRV_STAGING_APP`, or `IRV_PRODUCTION_APP`. The bundled app requires no GitHub Actions secrets. Keep the backend's runtime secrets and any credentials used for manual scripts.
 
 ## Updating credentials
 
-Replace provider credentials in every consumer that uses them, verify access, then revoke the old provider credential. Change promotion tokens in the backend and matching workflow secret together. Updating `.env` does not update an already deployed app. The encryption key needs the special migration procedure described above.
+Replace provider credentials in every consumer that uses them, verify access, then revoke the old provider credential. Change promotion tokens in the backend and any manual operator configuration together. Updating `.env` does not update an already deployed app. The encryption key needs the special migration procedure described above.

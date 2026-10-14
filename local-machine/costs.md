@@ -4,7 +4,7 @@
 
 **Billing:** [Fly.io dashboard](https://fly.io/dashboard) → the organization named by `FLY_ORG` → Billing.
 
-Fly hosts the irv backend and frontend together, and the separate sandbox Machines. Charges include running compute, retained root filesystems on stopped/suspended Machines, provisioned volumes even when detached, applicable networking, snapshots, certificates, and build resources. Destroying a Machine does not delete every associated billable resource. The backend stays running even when every sandbox is idle. Staging and daily live canaries also use billable resources.
+Fly hosts the irv backend and frontend together, and the separate sandbox Machines. Charges include running compute, retained root filesystems on stopped/suspended Machines, provisioned volumes even when detached, applicable networking, snapshots, certificates, and build resources. Destroying a Machine does not delete every associated billable resource. The backend stays running even when every sandbox is idle. Staging and manually invoked live smoke tests also use billable resources.
 
 **Pricing:** [Fly resource pricing](https://docs.fly.io/about/pricing).
 
@@ -26,7 +26,7 @@ The database stores accounts, invites, configuration, snapshot manifests, logs, 
 
 **Billing:** [GitHub billing and usage](https://github.com/settings/billing), or the owning organization's billing page.
 
-Actions runs tests, daily image rebuilds/scans, and deployments. GHCR hosts images. Applicable charges depend on your plan, repository/package visibility, Actions minutes, artifacts, and package storage/transfer. Daily rebuilds continue even when nobody opens a sandbox. Configure artifact and old-image retention in GitHub.
+The bundled update and deployment workflows have been removed; no daily rebuilds or canaries are scheduled by this repository. Existing queued/running jobs must be canceled separately. GHCR can still host manually published images. Existing artifacts and image packages remain stored, and other enabled GitHub services may still incur charges under your plan. Removing workflow files does not delete those resources or historical runs.
 
 ## Twilio Verify — optional
 
