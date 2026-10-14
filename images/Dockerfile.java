@@ -1,5 +1,5 @@
 ARG IRV_BASE=irv-blank:local
-FROM node:22-bookworm-slim AS node
+FROM node:25-bookworm-slim AS node
 FROM ${IRV_BASE}
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends openjdk-17-jdk-headless maven && rm -rf /var/lib/apt/lists/*
