@@ -1,0 +1,8 @@
+.env
+.env.*
+**/node_modules
+**/target
+**/dist
+**/data
+.git
+**/__pycache__

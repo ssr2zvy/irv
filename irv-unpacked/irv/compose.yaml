@@ -1,0 +1,26 @@
+services:
+  db:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: irv
+      POSTGRES_USER: irv
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Run scripts/init_env.py first}
+    volumes: [database:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U irv]
+      interval: 5s
+      retries: 12
+  app:
+    build: .
+    ports: ["127.0.0.1:8080:8080"]
+    env_file: .env
+    environment:
+      DATABASE_URL: jdbc:postgresql://db:5432/irv
+      DATABASE_USER: irv
+      IRV_BLOB_DIR: /data/blobs
+    depends_on:
+      db: {condition: service_healthy}
+    volumes: [blobs:/data]
+volumes:
+  database:
+  blobs:

@@ -1,0 +1,41 @@
+name: deploy validated backend
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency: {group: deploy, cancel-in-progress: false}
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.workflow_run.head_sha || github.sha }}'}
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r agent/requirements.txt
+      - name: Deploy staging control plane
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_DEPLOY_TOKEN }}
+          STAGING_APP: ${{ secrets.IRV_STAGING_APP }}
+        run: |
+          test -n "$STAGING_APP"
+          flyctl deploy --remote-only --ha=false --app "$STAGING_APP"
+      - name: Verify staging
+        env:
+          IRV_SMOKE_ORIGIN: ${{ secrets.IRV_SMOKE_ORIGIN }}
+          IRV_SMOKE_USERNAME: ${{ secrets.IRV_SMOKE_USERNAME }}
+          IRV_SMOKE_PASSWORD: ${{ secrets.IRV_SMOKE_PASSWORD }}
+          IRV_SMOKE_TOTP: ${{ secrets.IRV_SMOKE_TOTP }}
+        run: python3 scripts/live_smoke.py
+      - name: Deploy passed commit to production
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_DEPLOY_TOKEN }}
+          PRODUCTION_APP: ${{ secrets.IRV_PRODUCTION_APP }}
+        run: |
+          test -n "$PRODUCTION_APP"
+          flyctl deploy --remote-only --ha=false --app "$PRODUCTION_APP"
