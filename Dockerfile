@@ -11,7 +11,7 @@ RUN mvn -q dependency:go-offline
 COPY backend/src ./src
 COPY --from=ui /build/frontend/dist ./src/main/resources/static
 RUN mvn -q -DskipTests package
-FROM eclipse-temurin:17-jre-jammy
+FROM eclipse-temurin:25-jre-jammy
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 ENV FLYCTL_INSTALL=/opt/fly
 RUN curl --fail --silent --show-error --location https://fly.io/install.sh -o /tmp/install-fly.sh && sh /tmp/install-fly.sh && rm /tmp/install-fly.sh
