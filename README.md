@@ -2,7 +2,7 @@
 
 Invite-only browser development environments, with a Spring Boot control plane, React interface, Fly Machines, and incremental workspace storage in Tigris.
 
-**This ZIP contains implementation source and a runnable application JAR.** Local verification is recorded in `docs/VALIDATION.md`. Live Fly/Tigris/SMS deployment and Docker image builds require your accounts and must pass the included staging tests before production use. No credentials are bundled.
+**This repository contains implementation source and a runnable application JAR.** Local verification is recorded in `docs/VALIDATION.md`. Live Fly/Tigris/SMS deployment and Docker image builds require your accounts and must pass the included staging tests before production use. No credentials are bundled.
 
 ## Quick start: run the app locally
 
@@ -39,7 +39,7 @@ Compose runs PostgreSQL plus the application. Credentials are read from `.env`. 
 - Incremental fixed-size chunk snapshots of only the designated workspace. Hash verification, restore verification, file modes, timestamps, symlinks, empty directories, seven-day backup retention, and orphan-chunk collection.
 - Revision-controlled two-way TOML/script sync with conflict preservation. Configuration can be edited while an environment is offline.
 - A learned return hazard model, conservative measured recovery bounds, and a planner choosing lifecycle actions and delays under the 180-second startup constraint.
-- CI, daily image rebuild/scans/SBOM, API contract checks, daily dependency updates, staging canaries, and gated automatic image/backend promotion.
+- Manual build, test, image-publication, and deployment tools. The daily sandbox-environment maintenance worker is deferred; its requirements are recorded in the comment-only `backend/src/main/java/dev/irv/EnvironmentMaintenanceWorker.java`. Automatic image updates and Fly integration updates are not implemented.
 
 ## Build and test
 
@@ -71,7 +71,7 @@ Detailed implementation and deployment guides:
 - [Deployment and accounts](docs/DEPLOYMENT.md)
 - [Configuration contract](docs/CONFIGURATION.md)
 - [Cost algorithm and defaults](docs/ALGORITHM.md)
-- [Automatic updates](docs/MAINTENANCE.md)
+- [Deferred environment maintenance and manual image updates](docs/MAINTENANCE.md)
 - [Verification and operating limits](docs/VALIDATION.md)
 
 ## Repository layout
@@ -84,8 +84,7 @@ images/       Blank and Java image recipes
 scripts/      Builds, local/live smoke tests, credential setup and promotion
 contracts/    Fly OpenAPI baseline
 local-machine/ Costs, tokens, accounts, commands, settings, storage, and nitpicks
-.github/      CI, daily maintenance, dependency updates, deployment
-dist/         Runnable JAR in the distribution ZIP
+dist/         Runnable application JAR
 ```
 
 Control-plane coordination and agent WebSockets currently require **one backend replica**. Scaling the backend horizontally needs shared leases and agent-routing ownership before increasing replica count. This constraint does not prevent multiple sandbox Machines.
