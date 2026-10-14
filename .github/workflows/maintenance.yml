@@ -69,7 +69,7 @@ jobs:
         run: |
           test -n "$PRODUCTION_ORIGIN" && test -n "$MAINTENANCE_TOKEN"
           python3 scripts/promote.py "$PRODUCTION_ORIGIN"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: maintenance-evidence
