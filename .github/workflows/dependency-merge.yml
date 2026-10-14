@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Never check out or execute pull-request code in this privileged workflow.
-      - uses: dependabot/fetch-metadata@v2
+      - uses: dependabot/fetch-metadata@v3
         id: metadata
         with: {github-token: '${{ secrets.GITHUB_TOKEN }}'}
       - if: steps.metadata.outputs.update-type == 'version-update:semver-patch' || steps.metadata.outputs.update-type == 'version-update:semver-minor'
