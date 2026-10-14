@@ -32,15 +32,15 @@ jobs:
           docker build --no-cache -f images/Dockerfile.java --build-arg "IRV_BASE=$repo-blank:$tag" -t "$repo-java:$tag" .
           echo "BLANK=$repo-blank:$tag" >> "$GITHUB_ENV"
           echo "JAVA=$repo-java:$tag" >> "$GITHUB_ENV"
-      - uses: aquasecurity/trivy-action@0.33.1
+      - uses: aquasecurity/trivy-action@0.35.0
         with: {image-ref: '${{ env.BLANK }}', format: cyclonedx, output: blank-sbom.json}
-      - uses: aquasecurity/trivy-action@0.33.1
+      - uses: aquasecurity/trivy-action@0.35.0
         with: {image-ref: '${{ env.BLANK }}', severity: 'HIGH,CRITICAL', ignore-unfixed: true, exit-code: '1'}
-      - uses: aquasecurity/trivy-action@0.33.1
+      - uses: aquasecurity/trivy-action@0.35.0
         with: {image-ref: '${{ env.JAVA }}', severity: 'HIGH,CRITICAL', ignore-unfixed: true, exit-code: '1'}
       - name: Build control-plane image for vulnerability scan
         run: docker build --pull -t irv-control:scan .
-      - uses: aquasecurity/trivy-action@0.33.1
+      - uses: aquasecurity/trivy-action@0.35.0
         with: {image-ref: irv-control:scan, severity: 'HIGH,CRITICAL', ignore-unfixed: true, exit-code: '1'}
       - name: Push immutable candidates
         run: |
