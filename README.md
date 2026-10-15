@@ -2,7 +2,7 @@
 
 Invite-only browser development environments, with a Spring Boot control plane, React interface, Fly Machines, and incremental workspace storage in Tigris.
 
-**After applying the fixed-policy source patch, rebuild before running. The existing `dist/irv.jar` and checked-in frontend assets predate this patch. Run `bash scripts/build.sh` to refresh them, or deploy with the Docker source build.**
+**After applying the sync and logs source patch, rebuild before running. The existing `dist/irv.jar` and checked-in frontend assets predate this patch. Run `bash scripts/build.sh` to refresh them, or deploy with the Docker source build. Rebuild both sandbox images for the new editing protocol.**
 
 **This repository contains implementation source and a runnable application JAR.** Local verification is recorded in `docs/VALIDATION.md`. Live Fly/Tigris/SMS deployment and Docker image builds require your accounts and must pass the included staging tests before production use. No credentials are bundled.
 
@@ -21,7 +21,7 @@ java -jar dist/irv.jar
 
 Open **http://localhost:8080**. Register a username/password using the `IRV_BOOTSTRAP_INVITE` value in `.env`, then scan the enrollment QR with Microsoft Authenticator or Duo Mobile. Save the recovery codes. No email address is collected. The first invite creates the administrator and expires 24 hours after the first application boot. Remove the bootstrap variable after setup.
 
-The local JAR uses an H2 database under `./data`, and filesystem blob storage if `S3_BUCKET` is empty. This exercises the real app without a database subscription. Sandbox creation still uses Fly; configure the image references and Fly credentials first. To verify without spending on Fly, build from source and run `scripts/local_smoke.py`, which substitutes only the provider API.
+The local JAR uses an H2 database under `./data`, and filesystem blob storage if `S3_BUCKET` is empty. This exercises the real app without a database subscription. Sandbox creation still uses Fly; configure the image references and Fly credentials first. To verify without spending on Fly, build from source and run `scripts/local_smoke.py`, which substitutes the provider API. Restricted hosts can additionally select the explicitly documented privilege/transport test fixture.
 
 Alternatively:
 
@@ -39,7 +39,7 @@ Compose runs PostgreSQL plus the application. Credentials are read from `.env`. 
 - Two image recipes: a common blank Python/Bash/Git/agent image, and an extended JDK 17/Maven/Node 22 image. The common layers are reused through image inheritance.
 - One Fly App and distinct private network per sandbox. Only an environment-specific bearer token is passed to the agent; Fly/Tigris/maintenance credentials remain in the control plane.
 - Incremental fixed-size chunk snapshots of only the designated workspace. Hash verification, restore verification, file modes, timestamps, symlinks, empty directories, seven-day backup retention, and orphan-chunk collection.
-- Revision-controlled two-way TOML/script sync with conflict preservation. Configuration can be edited while an environment is offline.
+- Revision-controlled TOML/script delivery with exclusive editing, recoverable drafts, and machine acknowledgements. Configuration can be edited while an environment is offline.
 - A fixed five-minute idle policy: working volume during use, verified final incremental save and log flush, then Machine and volume deletion. Returns cancel pre-commit cleanup. Failed saves retain working resources. Recovery estimates above 180 seconds cause a retention exception.
 - Adaptive cost optimization is deferred in the entirely commented `backend/src/main/java/dev/irv/DeferredCostOptimizer.java`; telemetry and configured-rate cost reporting remain active.
 - Manual build, test, image-publication, and deployment tools. The daily sandbox-environment maintenance worker is deferred; its requirements are recorded in the comment-only `backend/src/main/java/dev/irv/EnvironmentMaintenanceWorker.java`. Automatic image updates and Fly integration updates are not implemented.
@@ -91,3 +91,7 @@ dist/         Runnable application JAR
 ```
 
 Control-plane coordination and agent WebSockets currently require **one backend replica**. Scaling the backend horizontally needs shared leases and agent-routing ownership before increasing replica count. This constraint does not prevent multiple sandbox Machines.
+
+## Guarded configuration and session logs
+
+The configuration editor now uses one exclusive editing session across app and terminal. Terminal editing uses `irv edit`; direct writes to managed files are denied by the sandbox image. Logs have durable replay, explicit acknowledgements and separate stdout/stderr streams. See [docs/SYNC_AND_LOGS.md](docs/SYNC_AND_LOGS.md). Rebuild both sandbox images and backend for this protocol change.

@@ -78,3 +78,13 @@ python3 scripts/live_smoke.py
 ```
 
 This creates billable canaries. If interrupted, inspect staging resources for cleanup. Image build/push commands are in [deployment](../docs/DEPLOYMENT.md); manual image selection and rollback are in [maintenance](../docs/MAINTENANCE.md). These commands do not run on a schedule; the environment-maintenance worker is deferred.
+
+## Managed editing and logs
+
+- `irv edit config.toml` — acquire the bundle lease and edit with `$EDITOR` (default nano).
+- `irv edit scripts/environment.sh` — edit the entrypoint through the same lease.
+- `irv edit --takeover config.toml` — explicitly revoke an existing editor.
+- `irv edit --recover EDITOR_ID config.toml` — recover a saved draft; use `--review-latest` only after review.
+- `irv status` — current committed bundle, pending acknowledgement and editor status.
+- `irv logs --follow` / `irv logs --session ID` — app-side log history.
+- `irv logs --local` — current local log archive segment.

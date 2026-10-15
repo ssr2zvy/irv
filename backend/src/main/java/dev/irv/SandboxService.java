@@ -55,39 +55,7 @@ public class SandboxService {
 
   public Object config(
       String id, long revision, String config, Map<String, String> files, boolean push) {
-    var parsed = Config.parse(config);
-    if (!files.containsKey(parsed.getString("entrypoint")))
-      throw bad("Entrypoint must be present in startup files");
-    synchronized (lock("config:" + id)) {
-      var s = get(id);
-      String oldFolder = Config.parse(str(s, "config")).getString("folder_name");
-      if (!oldFolder.equals(parsed.getString("folder_name"))
-          && (s.get("snapshot_id") != null || s.get("machine_id") != null))
-        throw conflict("Folder name is fixed after first start");
-      if (db.exec(
-              "UPDATE sandboxes SET config=?,files=?,revision=revision+1,updated=? WHERE id=? AND"
-                  + " revision=?",
-              config,
-              json(files),
-              now(),
-              id,
-              revision)
-          != 1) throw conflict("Configuration changed on the other side; refresh and merge");
-      if (push && hub.connected(id))
-        work.submit(
-            () -> {
-              try {
-                hub.call(
-                    id,
-                    "config",
-                    Map.of("config", config, "files", files, "revision", revision + 1),
-                    20);
-              } catch (Exception e) {
-                db.log(id, "sync", e.getMessage());
-              }
-            });
-      return Map.of("revision", revision + 1);
-    }
+    throw conflict("Use ConfigSync with an editing lease");
   }
 
   public void open(String id) {
@@ -173,6 +141,13 @@ public class SandboxService {
         from,
         now(),
         id);
+    db.exec("UPDATE sandbox_runs SET ended=? WHERE sandbox_id=? AND ended IS NULL", now(), id);
+    db.exec(
+        "INSERT INTO sandbox_runs(session_id,sandbox_id,machine_id,started) VALUES(?,?,?,?)",
+        session,
+        id,
+        s.get("machine_id"),
+        requestedAt);
     db.log(id, "platform", "Starting from " + from + "; deadline 180 seconds");
     if (!str(s, "machine_id").isEmpty()) {
       fly.action(s, "start");
@@ -204,6 +179,8 @@ public class SandboxService {
     meterOne(get(id), now());
     db.exec(
         "UPDATE sandboxes SET machine_id=?,updated=? WHERE id=?", m.path("id").asText(), now(), id);
+    db.exec(
+        "UPDATE sandbox_runs SET machine_id=? WHERE session_id=?", m.path("id").asText(), session);
     db.log(id, "provider", json(m.path("events")));
   }
 
@@ -244,6 +221,7 @@ public class SandboxService {
         throw conflict(
             "Final save/log flush not verified; retaining environment (rebuild sandbox images if"
                 + " needed)");
+      db.exec("UPDATE sandboxes SET logs_pending=0 WHERE id=?", id);
       if (lng(s, "lease_until") > now()) {
         cancelSave(id);
         return;
@@ -259,6 +237,7 @@ public class SandboxService {
                 + " WHERE id=?",
             now(),
             id);
+        db.exec("UPDATE sandbox_runs SET ended=? WHERE sandbox_id=? AND ended IS NULL", now(), id);
         return;
       }
       // Atomic commit point: earlier returns cancel, later returns finish cleanup then recreate.
@@ -321,6 +300,7 @@ public class SandboxService {
         now(),
         id);
     db.log(id, "lifecycle", "Final snapshot retained; machine and working volume released");
+    db.exec("UPDATE sandbox_runs SET ended=? WHERE sandbox_id=? AND ended IS NULL", now(), id);
   }
 
   public void stop(String id) {
@@ -330,6 +310,48 @@ public class SandboxService {
         now(),
         id);
     enqueue(id, () -> transition(id, "stopped"));
+  }
+
+  public void rebuildAgent(String id) {
+    enqueue(id, () -> rebuildStopped(id));
+  }
+
+  void rebuildStopped(String id) {
+    var s = get(id);
+    if (!str(s, "state").equals("stopped")
+        || str(s, "volume_id").isEmpty()
+        || str(s, "snapshot_id").isEmpty()
+        || lng(s, "lease_until") > now())
+      throw conflict(
+          "Stop and verify a checkpoint before recreating this Machine; its volume will be"
+              + " retained");
+    var catalog = db.one("SELECT value FROM settings WHERE name=?", "image:" + s.get("image_kind"));
+    String image =
+        catalog == null
+            ? env(str(s, "image_kind").equals("java") ? "IRV_JAVA_IMAGE" : "IRV_BLANK_IMAGE", "")
+            : str(catalog, "value");
+    if (image.isBlank()) throw bad("Configure the new sandbox image before rebuilding");
+    if (!str(s, "machine_id").isEmpty()) {
+      try {
+        if (!Set.of("stopped", "destroyed").contains(fly.machine(s).path("state").asText()))
+          throw conflict("Provider Machine is not stopped yet");
+      } catch (IllegalStateException e) {
+        if (!e.getMessage().contains("returned 404")) throw e;
+      }
+      fly.destroy(s); // Deliberately retain the mounted volume and its entire working copy.
+    }
+    db.exec(
+        "UPDATE sandboxes SET"
+            + " machine_id=NULL,agent_hash=NULL,image_ref=?,state='cold',applied_revision=0,next_action=NULL,next_action_at=NULL,error=NULL,updated=?"
+            + " WHERE id=?",
+        image,
+        now(),
+        id);
+    db.log(
+        id,
+        "platform",
+        "Stopped Machine removed for image upgrade; working volume retained. Start to recreate with"
+            + " the selected image.");
   }
 
   public void archive(String id) {

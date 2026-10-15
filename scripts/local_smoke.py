@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run the real Java server and Python agent, using a local fake Fly API. No cloud spend."""
 import asyncio,base64,contextlib,hashlib,hmac,http.server,json,os,pathlib,secrets,signal,struct,subprocess,tempfile,threading,time,urllib.parse,shutil
-import aiohttp
+import aiohttp,json,sys
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 JAR=ROOT/'backend/target/irv-0.1.0.jar'
 
@@ -22,9 +22,13 @@ async def main():
     if self.path=='/v1/apps':apps.add('/v1/apps/'+body['app_name']);self.reply({'id':'testapp'});return
     if self.path.endswith('/volumes'):self.reply({'id':'test-volume'});return
     if self.path.endswith('/machines'):
-     mid=secrets.token_hex(7);env={**os.environ,**body['config']['env'],'IRV_ALLOW_PROCESS_CONTROL':'0','IRV_HOME':str(d/'home'),'IRV_WORKSPACE_BASE':str(d/'work'),'IRV_RUNTIME':str(d/'runtime')}
+     mid=secrets.token_hex(7);env={**os.environ,**body['config']['env'],'IRV_ALLOW_PROCESS_CONTROL':'0','IRV_HOME':str(d/'home'),'IRV_WORKSPACE_BASE':str(d/'work'),'IRV_RUNTIME':str(d/'runtime'),'IRV_DEV_UID':str(os.getuid())}
      (d/'home').mkdir(exist_ok=True);log=open(d/f'agent-{mid}.log','w');agent_logs.append(log)
-     p=subprocess.Popen(['python3',str(ROOT/'agent/agent.py')],env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);agents.append(p);machine_processes[mid]=p;machines[mid]={'id':mid,'state':'started','events':[]};self.reply(machines[mid]);return
+     # Local protocol test only: this host may have no SETUID capabilities.
+     command=['python3',str(ROOT/'agent/agent.py')]
+     if os.environ.get('IRV_SMOKE_SIMULATE_UID')=='1':
+      command=['python3',str(ROOT/'scripts/smoke_agent.py')]
+     p=subprocess.Popen(command,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);agents.append(p);machine_processes[mid]=p;machines[mid]={'id':mid,'state':'started','events':[]};self.reply(machines[mid]);return
     self.reply({})
    def do_DELETE(self):
     path=urllib.parse.urlsplit(self.path).path
@@ -35,7 +39,7 @@ async def main():
       with contextlib.suppress(Exception):p.wait(timeout=5)
      machines.pop(mid,None);provider_deletes.append('machine')
     elif '/volumes/' in path:
-     shutil.rmtree(d/'work',ignore_errors=True);provider_deletes.append('volume')
+     shutil.rmtree(d/'work',ignore_errors=True);shutil.rmtree(d/'runtime',ignore_errors=True);provider_deletes.append('volume')
     self.reply({})
    def reply(self,obj,status=200):
     out=json.dumps(obj).encode();self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(out)));self.end_headers();self.wfile.write(out)
@@ -60,6 +64,13 @@ async def main():
     await api('/auth/register','POST',{'username':'smoke','password':'long-test-password','invite':invite})
     enroll=await api('/auth/enroll','POST',{'factor':'totp'});mfa=await api('/auth/verify','POST',{'code':otp(enroll['secret'])});assert len(mfa['recoveryCodes'])==10
     box=await api('/sandboxes','POST',{'name':'Local smoke','image':'blank'});prefix='/sandboxes/'+box['id']
+    async def edit_config(config,files,delete=None):
+     editor=secrets.token_hex(16);lease=await api(prefix+'/sync/acquire','POST',{'editor':editor})
+     result=await api(prefix+'/sync/commit','POST',{'editor':editor,'fence':lease['fence'],'lease_token':lease['lease_token'],'revision':lease['revision'],'draft_version':1,'request_id':secrets.token_hex(16),'config':config,'files':files,'delete':delete or []})
+     assert result.get('committed'),result
+     await api(prefix+'/sync/release','POST',{'editor':editor,'fence':lease['fence'],'lease_token':lease['lease_token']})
+     return result
+    await edit_config(box['config']+'\n[processes.logtest]\ncommand = "echo stdout-marker; echo stderr-marker >&2"\n',json.loads(box['files']))
     await api(prefix+'/open','POST')
     for _ in range(100):
      box=await api(prefix)
@@ -83,23 +94,51 @@ async def main():
      await asyncio.sleep(.2)
     assert snaps,'Missing snapshot'
     box=await api(prefix);files=json.loads(box['files']);files['scripts/helper.sh']='export DEMO=ok\n'
-    await api(prefix+'/config','PUT',{'revision':box['revision'],'config':box['config'],'files':files})
+    await edit_config(box['config'].replace('helpers = []','helpers = ["scripts/helper.sh"]'),files)
     for _ in range(50):
      if (d/'work/workspace/scripts/helper.sh').exists():break
      await asyncio.sleep(.1)
     assert (d/'work/workspace/scripts/helper.sh').read_text()=='export DEMO=ok\n'
-    # Local edit reflected in backend.
-    (d/'work/workspace/scripts/helper.sh').write_text('export DEMO=changed\n')
+    # The sandbox CLI and app use the same server-side lease authority.
+    simulate=os.environ.get('IRV_SMOKE_SIMULATE_UID')=='1'
+    connector=aiohttp.TCPConnector() if simulate else aiohttp.UnixConnector(path=str(d/'runtime/editor.sock'))
+    local_url='http://127.0.0.1:'+(d/'runtime/test-port').read_text() if simulate else 'http://irv'
+    async with aiohttp.ClientSession(connector=connector) as terminal:
+     async def local(op,body):
+      async with terminal.post(local_url+'/'+op,json=body) as response:
+       data=await response.json();assert response.status==200,data;return data
+     editor=secrets.token_hex(16);lease=await local('acquire',{'editor':editor})
+     try:await api(prefix+'/sync/acquire','POST',{'editor':secrets.token_hex(16)})
+     except RuntimeError as e:assert '409' in str(e)
+     else:raise AssertionError('App stole live terminal editing lease')
+     files=lease['files'];files['scripts/helper.sh']='export DEMO=changed\n'
+     result=await local('commit',{'editor':editor,'fence':lease['fence'],'lease_token':lease['lease_token'],'revision':lease['revision'],'draft_version':1,'request_id':secrets.token_hex(16),'config':lease['config'],'files':files})
+     assert result['committed'];await local('release',{'editor':editor,'fence':lease['fence'],'lease_token':lease['lease_token']})
     for _ in range(50):
      box=await api(prefix)
-     if 'changed' in json.loads(box['files']).get('scripts/helper.sh',''):break
+     if box['applied_revision']==box['revision']:break
      await asyncio.sleep(.2)
-    assert 'changed' in json.loads(box['files'])['scripts/helper.sh']
+    assert (d/'work/workspace/scripts/helper.sh').read_text()=='export DEMO=changed\n'
+    # Exercise the actual CLI with a scripted editor; only transport is injected in the restricted fixture.
+    editor_script=d/'editor.py';editor_script.write_text("import pathlib,sys,time\npathlib.Path(sys.argv[1]).write_text('export DEMO=cli\\n')\ntime.sleep(1.3)\n")
+    cli_env={**os.environ,'EDITOR':sys.executable+' '+str(editor_script),'WORKSPACE_DIR':str(d/'work/workspace'),'IRV_EDITOR_SOCKET':str(d/'runtime/editor.sock')}
+    cli_command=[sys.executable,str(ROOT/'agent/irv_cli.py'),'edit','scripts/helper.sh']
+    if simulate:
+     code="import sys,asyncio,aiohttp;sys.path.insert(0,"+repr(str(ROOT/'agent'))+");import irv_cli;sys.argv=['irv','edit','scripts/helper.sh'];asyncio.run(irv_cli.main(lambda:aiohttp.TCPConnector(),"+repr(local_url)+"))"
+     cli_command=[sys.executable,'-c',code]
+    process=await asyncio.create_subprocess_exec(*cli_command,env=cli_env,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+    output,err=await asyncio.wait_for(process.communicate(),30);assert process.returncode==0,(output,err)
+    for _ in range(50):
+     if (d/'work/workspace/scripts/helper.sh').read_text()=='export DEMO=cli\n':break
+     await asyncio.sleep(.2)
+    assert (d/'work/workspace/scripts/helper.sh').read_text()=='export DEMO=cli\n'
+    box=await api(prefix)
+
     # HTTP preview forwards to a real loopback server through the agent tunnel.
     preview_server=http.server.ThreadingHTTPServer(('127.0.0.1',0),type('PreviewHandler',(http.server.BaseHTTPRequestHandler,),{'do_GET':lambda self:(self.send_response(200),self.end_headers(),self.wfile.write(b'preview-ok')),'log_message':lambda *a:None}))
     threading.Thread(target=preview_server.serve_forever,daemon=True).start();preview_port=preview_server.server_port
     config=box['config'].replace('8080, 5173',f'8080, 5173, {preview_port}')
-    await api(prefix+'/config','PUT',{'revision':box['revision'],'config':config,'files':json.loads(box['files'])});await asyncio.sleep(.5)
+    await edit_config(config,json.loads(box['files']));await asyncio.sleep(2)
     grant=await api(prefix+'/preview','POST',{'port':preview_port});host=urllib.parse.urlsplit(grant['url']).netloc
     async with client.get(origin+'/test',headers={'Host':host}) as r:assert r.status==200,(r.status,await r.text());assert await r.text()=='preview-ok'
     preview_server.shutdown()
@@ -111,13 +150,23 @@ async def main():
      return socket
     webapp=web.Application();webapp.router.add_get('/echo',echo);runner=web.AppRunner(webapp);await runner.setup();site=web.TCPSite(runner,'127.0.0.1',0);await site.start();wsport=site._server.sockets[0].getsockname()[1]
     box=await api(prefix);config=box['config'].replace('8080, 5173',f'8080, 5173, {wsport}')
-    await api(prefix+'/config','PUT',{'revision':box['revision'],'config':config,'files':json.loads(box['files'])});await asyncio.sleep(.5)
+    await edit_config(config,json.loads(box['files']));await asyncio.sleep(2)
     grant=await api(prefix+'/preview','POST',{'port':wsport});host=urllib.parse.urlsplit(grant['url']).netloc
     async with client.ws_connect(origin.replace('http','ws')+'/echo',headers={'Host':host},protocols=('vite-hmr',)) as ws:
      await ws.send_str('hello');msg=await asyncio.wait_for(ws.receive(),10);assert msg.data=='echo:hello',msg
     await runner.cleanup()
 
     logs=await api(prefix+'/logs');assert logs
+    assert any(x['stream']=='stdout' and 'stdout-marker' in x['message'] for x in logs)
+    assert any(x['stream']=='stderr' and 'stderr-marker' in x['message'] for x in logs)
+    # An unmanaged helper becomes ordinary user data; cold restore must not replay old contents over it.
+    box=await api(prefix);files=json.loads(box['files']);files.pop('scripts/helper.sh')
+    await edit_config(box['config'].replace('helpers = ["scripts/helper.sh"]','helpers = []'),files)
+    for _ in range(50):
+     box=await api(prefix)
+     if box['applied_revision']==box['revision']:break
+     await asyncio.sleep(.2)
+    (d/'work/workspace/scripts/helper.sh').write_text('ordinary-user-content\n')
     # Exercise the same final-save/cleanup operation used by the fixed timer, without
     # waiting five minutes. Timing, cancellation and retries are covered in Java checks.
     await api(prefix+'/archive','POST')
@@ -136,6 +185,7 @@ async def main():
      await asyncio.sleep(.3)
     assert box['state']=='running',box
     assert (d/'work/workspace/example.txt').read_text()=='persisted-value'
+    assert (d/'work/workspace/scripts/helper.sh').read_text()=='ordinary-user-content\n'
     print('PASS: verified final save, log flush, machine then volume release, new volume and cold workspace restore')
     print('PASS: real server + agent: signup, TOTP, owner session, sandbox creation, startup readiness, browser PTY, chunk save, bidirectional config sync, isolated-host HTTP and WebSocket previews, persisted logs, frontend serving')
   except Exception:

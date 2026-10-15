@@ -110,26 +110,48 @@ public class Maintenance {
     }
   }
 
-  @Scheduled(fixedDelay = 30000)
+  @Scheduled(fixedDelay = 10000)
   public void containerLogs() {
     if (!env("IRV_FLY_LOGS", "false").equals("true")) return;
     for (var s :
-        db.all("SELECT id,app_name,session_id FROM sandboxes WHERE machine_id IS NOT NULL")) {
-      String text = fly.logs(str(s, "app_name"));
+        db.all(
+            "SELECT id,app_name,session_id FROM sandboxes WHERE machine_id IS NOT NULL OR updated>"
+                + (now() - 300000)
+                + "")) {
+      String text;
+      try {
+        text = fly.logs(str(s, "app_name"));
+      } catch (Exception e) {
+        db.log(str(s, "id"), "log-sync", e.getMessage());
+        continue;
+      }
       for (String line : text.split("\\n")) {
         if (line.isBlank()) continue;
         try {
           var event = node(line);
           String message = event.path("message").asText(line);
+          long occurred = now();
+          String ts = event.path("timestamp").asText(event.path("time").asText(""));
+          try {
+            occurred = java.time.Instant.parse(ts).toEpochMilli();
+          } catch (Exception ignored) {
+          }
+          var run =
+              db.one(
+                  "SELECT session_id FROM sandbox_runs WHERE sandbox_id=? AND started<=? ORDER BY"
+                      + " started DESC LIMIT 1",
+                  s.get("id"),
+                  occurred);
+          Object session = run == null ? s.get("session_id") : run.get("session_id");
           db.exec(
               "INSERT INTO logs(sandbox_id,session_id,source,event_key,message,created)"
                   + " VALUES(?,?,?,?,?,?)",
               s.get("id"),
-              s.get("session_id"),
+              session,
               "container",
               str(s, "id") + ":" + hash(line),
               message.substring(0, Math.min(16000, message.length())),
-              now());
+              occurred);
         } catch (Exception ignored) {
         }
       }

@@ -12,6 +12,7 @@ public final class Config {
       schema_version = 1
       folder_name = "workspace"
       entrypoint = "scripts/environment.sh"
+      helpers = []
       preview_ports = [8080, 5173]
       [keywords.work]
       root = "workspace"
@@ -27,6 +28,7 @@ public final class Config {
             "schema_version",
             "folder_name",
             "entrypoint",
+            "helpers",
             "preview_ports",
             "keywords",
             "processes");
@@ -38,6 +40,8 @@ public final class Config {
     if (folder == null || !folder.matches("[a-zA-Z][a-zA-Z0-9_-]{0,39}"))
       throw bad("folder_name must be a single simple directory name");
     relative(t.getString("entrypoint"));
+    var helpers = t.getArray("helpers");
+    if (helpers != null) for (int i = 0; i < helpers.size(); i++) relative(helpers.getString(i));
     var kw = t.getTable("keywords");
     if (kw != null)
       for (String name : kw.keySet()) {
@@ -102,6 +106,27 @@ public final class Config {
               m.put(e.getKey(), e.getValue().asText());
             });
     return m;
+  }
+
+  public static Set<String> managed(String config) {
+    var t = parse(config);
+    var names = new TreeSet<String>();
+    names.add(t.getString("entrypoint"));
+    var helpers = t.getArray("helpers");
+    if (helpers != null)
+      for (int i = 0; i < helpers.size(); i++) {
+        if (!names.add(helpers.getString(i))) throw bad("Duplicate managed path");
+      }
+    for (String p : names) {
+      if (p.isBlank()
+          || p.equals(".")
+          || p.equals("config.toml")
+          || !java.nio.file.Path.of(p).normalize().toString().equals(p))
+        throw bad("Invalid managed path");
+      for (String q : names)
+        if (!q.equals(p) && p.startsWith(q + "/")) throw bad("Managed paths overlap");
+    }
+    return names;
   }
 
   public static boolean port(String conf, int port) {
