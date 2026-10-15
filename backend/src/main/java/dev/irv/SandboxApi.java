@@ -239,6 +239,22 @@ public class SandboxApi {
 
   @GetMapping("/health")
   public Object health() {
+    if ("true".equals(env("IRV_TUNNEL_ENABLED", "false"))) {
+      java.net.HttpURLConnection connection = null;
+      try {
+        connection = (java.net.HttpURLConnection)
+            new java.net.URL("http://127.0.0.1:2000/ready").openConnection(java.net.Proxy.NO_PROXY);
+        connection.setConnectTimeout(1000);
+        connection.setReadTimeout(1000);
+        connection.setInstanceFollowRedirects(false);
+        if (connection.getResponseCode() != 200) throw new java.io.IOException();
+      } catch (java.io.IOException unavailable) {
+        return org.springframework.http.ResponseEntity.status(503)
+            .body(Map.of("status", "unavailable", "name", "irv", "tunnel", "unavailable"));
+      } finally {
+        if (connection != null) connection.disconnect();
+      }
+    }
     return Map.of("status", "ok", "name", "irv");
   }
 }
