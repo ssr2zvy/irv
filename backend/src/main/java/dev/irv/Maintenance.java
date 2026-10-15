@@ -1,5 +1,7 @@
 package dev.irv;
 
+import org.springframework.context.annotation.Profile;
+
 import static dev.irv.Util.*;
 
 import jakarta.servlet.http.*;
@@ -11,6 +13,7 @@ import org.springframework.scheduling.annotation.*;
 import org.springframework.stereotype.*;
 import org.springframework.web.bind.annotation.*;
 
+@Profile("!auth-only")
 @Component
 @RestController
 public class Maintenance {

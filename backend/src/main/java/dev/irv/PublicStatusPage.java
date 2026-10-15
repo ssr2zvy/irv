@@ -1,5 +1,7 @@
 package dev.irv;
 
+import org.springframework.context.annotation.Profile;
+
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.nio.charset.StandardCharsets;
@@ -13,6 +15,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 
 /** Public connectivity page on a separate listener, isolated from application routes. */
+@Profile("!auth-only")
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "irv.public-status.enabled", havingValue = "true")
 public class PublicStatusPage {

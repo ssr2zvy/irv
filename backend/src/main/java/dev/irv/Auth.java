@@ -1,5 +1,7 @@
 package dev.irv;
 
+import org.springframework.context.annotation.Profile;
+
 import static dev.irv.Util.*;
 
 import jakarta.servlet.http.*;
@@ -11,6 +13,7 @@ import org.springframework.boot.*;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.*;
 
+@Profile("!auth-only")
 @Component
 public class Auth implements ApplicationRunner {
   final Db db;
