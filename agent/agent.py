@@ -53,7 +53,7 @@ class Agent:
         self.session = None; self.http = None; self.ws = None; self.root = None; self.config = {}; self.revision = 0
         self.files = {}; self.baseline = None; self.terminals = {}; self.processes = {}
         self.frozen = []; self.env = {}; self.ready = False; self.events = []
-        self.serial = asyncio.Lock(); self.tasks = set(); self.preview_ws = {}; self.pending_preview = {}
+        self.serial = asyncio.Lock(); self.event_lock = asyncio.Lock(); self.quiesced = False; self.tasks = set(); self.preview_ws = {}; self.pending_preview = {}
         RUNTIME.mkdir(parents=True, exist_ok=True)
         self.logfile = RUNTIME/'events.jsonl'
         if self.logfile.exists():
@@ -169,12 +169,30 @@ class Agent:
         for pid in pids:
             with contextlib.suppress(ProcessLookupError,PermissionError):os.kill(pid,signal.SIGKILL)
 
+    async def flush_events(self):
+        # The periodic uploader and final save share this lock; never drop another
+        # uploader's batch when both finish at once. Backend event IDs are idempotent.
+        async with self.event_lock:
+            while self.events:
+                batch=self.events[:100]
+                await self.request('POST','/events',json=batch)
+                del self.events[:len(batch)]
+                atomic(self.logfile,''.join(json.dumps(e)+'\n' for e in self.events))
+
+    async def sync_config(self):
+        bundle=self.bundle()
+        if bundle!=self.baseline:
+            result=await self.request('POST','/config',json={**bundle,'revision':self.revision})
+            self.revision=result['revision'];self.files=bundle['files'];self.config=validate_config(bundle['config']);self.baseline=bundle;self.keywords()
+
     async def snapshot(self, final=False, shutdown=False):
-        start=time.monotonic()
+        start=time.monotonic();was_ready=self.ready
         if self.root.is_symlink():raise ValueError('Workspace root cannot be replaced by a symlink')
+        if final:self.quiesced=True;self.ready=False
         if shutdown:await self.terminate_work()
         self.freeze()
         try:
+            if final:await self.sync_config()
             entries=[];total=0;uploaded=0
             for base,dirs,files in os.walk(self.root,followlinks=False):
                 dirs.sort();files.sort()
@@ -197,7 +215,11 @@ class Agent:
             result=await self.request('POST','/snapshots',json={'version':1,'entries':entries})
             self.log('save',f'Saved {total} bytes; uploaded {uploaded} new bytes; snapshot {result["snapshot"]}')
             await self.request('POST','/telemetry',json={'kind':'save','seconds':time.monotonic()-start,'bytes':uploaded})
-            return {'verified':True,**result}
+            if final:await self.flush_events()
+            return {'verified':True,'logs_flushed':final,**result}
+        except BaseException:
+            self.unfreeze();self.quiesced=False;self.ready=was_ready
+            raise
         finally:
             if not final:self.unfreeze()
 
@@ -282,9 +304,11 @@ class Agent:
             else:
                 async with self.serial:
                     if op=='save':result=await self.snapshot(data.get('final',False),data.get('shutdown',False))
-                    elif op=='config':self.overlay(data);result={'revision':self.revision}
+                    elif op=='config':
+                        if self.quiesced:raise ValueError('Final checkpoint in progress; app configuration remains saved for next startup')
+                        self.overlay(data);result={'revision':self.revision}
                     elif op in ('resume','unfreeze'):
-                        self.unfreeze();boot=await self.request('GET','/bootstrap');self.session=boot.get('session');self.overlay(boot);await self.start_processes();self.ready=True;await self.emit({'type':'ready'});result={'ok':True}
+                        self.unfreeze();self.quiesced=False;boot=await self.request('GET','/bootstrap');self.session=boot.get('session');self.overlay(boot);await self.start_processes();self.ready=True;await self.emit({'type':'ready'});result={'ok':True}
                     else:raise ValueError('Unknown operation')
             await self.emit({'type':'rpc_result','request':n['request'],'data':result})
         except Exception as e:
@@ -335,15 +359,10 @@ class Agent:
         while True:
             await asyncio.sleep(1)
             try:
-                if self.events:
-                    batch=self.events[:100];await self.request('POST','/events',json=batch);del self.events[:len(batch)]
-                    atomic(self.logfile,''.join(json.dumps(e)+'\n' for e in self.events))
-                if not self.ready or self.frozen:continue
+                await self.flush_events()
+                if not self.ready or self.quiesced or self.frozen:continue
                 async with self.serial:
-                    bundle=self.bundle()
-                    if bundle!=self.baseline:
-                        result=await self.request('POST','/config',json={**bundle,'revision':self.revision})
-                        self.revision=result['revision'];self.files=bundle['files'];self.config=validate_config(bundle['config']);self.baseline=bundle;self.keywords()
+                    await self.sync_config()
                     if time.monotonic()-last_tree>30:
                         tree=[{'root':'workspace','path':'.'}]
                         for base,dirs,_ in os.walk(self.root,followlinks=False):

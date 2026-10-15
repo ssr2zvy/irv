@@ -1,35 +1,45 @@
-# Lifecycle controller
+# Fixed lifecycle policy and deferred optimization
 
-## Inputs and learned quantities
+The active policy is `FixedLifecyclePolicy`, invoked by `SandboxService`. There is no active learned cost optimizer. `DeferredCostOptimizer.java` is entirely comments describing the deferred design. The old `Optimizer` and `CostModel` executable sources have been removed.
 
-The controller uses machine state, retained volume, elapsed absence, workspace bytes, current configured rates, save/restore observations, and the owner's past return intervals. CPU metrics are imported for operational visibility; Fly compute billing uses provisioned resources and lifecycle duration, not raw CPU utilization.
+## Active behavior
 
-`CostModel` is a small Bayesian piecewise-constant hazard model. Return-time intervals are 0, 1, 3, 10, 30 minutes, 1, 4, 12 hours, 1, 3, 7, 30 days and an unbounded tail. Each interval estimates events/exposure with a weak six-hour prior. A still-open absence contributes exposure without an invented return. The last 500 owner observations are considered; weights decay with a 30-day half-life and other workspaces have one-quarter weight. At present time-of-day/weekday features are not used. They can be added when enough history exists to estimate them reliably.
+1. Newly created sandbox Machines always attach a Fly working volume. The designated folder is `/persist/<folder_name>`, with the existing home-directory alias. The volume contains the working copy, not a saved RAM image.
+2. Active terminal heartbeats and HTTP/WebSocket preview traffic renew usage leases. When the last lease expires, a fixed **300-second** idle countdown begins. A socket close can leave up to 45 seconds on its last lease; it does not override another preview's lease. Logs/config viewing does not renew the lease. Custom bounded background-job leases remain outside this patch.
+3. The central scheduler polls every second. At or after the deadline, it begins a final checkpoint. Five minutes is the save trigger, not an unconditional destruction deadline. Worker scheduling and saving can take additional time.
+4. The agent prevents new terminal creation, freezes user processes without killing them, syncs local config/scripts, uploads missing chunks, commits the manifest, reports save telemetry, and flushes its pending log queue. A final acknowledgement must name the backend's current committed snapshot and confirm log flushing.
+5. A return before cleanup commits cancels deletion and unfreezes work. After verification and the recovery guard, the backend atomically records `deleting` with the verified snapshot ID. After this point a return finishes the committed cleanup and recreates the environment; it cannot undo a provider deletion already in flight.
+6. Delete the Machine first, then its working volume. Keep IDs until each successful deletion; a provider 404 counts as already deleted. Retry partial cleanup after a failure or control-plane restart. Pin the committed snapshot during cleanup. Only after both resources are released mark the sandbox `cold`.
+7. Reopening provisions a volume and Machine, restores the designated files from the selected incremental snapshot and applies current app-side configuration before startup. Base images remain registry content. Snapshot manifests remain in the app database; file chunks are in Tigris (or local blob storage in local tests).
 
-Recovery bounds use the largest of a conservative initial size-based estimate and 1.3 times each of the last 30 measured startup times plus 5 seconds. This is a conservative empirical guard, not a mathematical upper bound on provider failures. A changed image or arbitrary user script can invalidate historical performance.
+An operation failure retains the remaining working resources and displays the error. Automatic retries wait 60 seconds. A backend restart during an uncommitted save unfreezes and retries from a working state; a restart during committed deletion resumes cleanup. Heartbeat/reopen activity clears the old absence and countdown. Prices and return history never change the five-minute duration.
 
-## Decisions
+Manual **Stop** remains save-then-stop with its volume retained; it deliberately does not destroy that volume. Reopen it to resume the automatic policy. Manual **Archive** uses final-save-and-release and then hides the sandbox record; it is not permanent snapshot erasure. Legacy stopped/suspended/volume records are retained until reopened; an old periodic snapshot alone does not authorize deletion. A legacy running Machine without a volume is checkpointed before cold cleanup; its next creation attaches a volume. There is no automatic live disk migration.
 
-Candidate states: running, suspended, stopped, destroyed with retained volume, and fully cold. A volume-retention candidate is available only when a volume exists. The deployment setting `IRV_WORKING_STORAGE=ephemeral|volume` controls the working-copy medium at creation; this release optimizes retention/deletion of that medium, not live migration between root disk and a newly provisioned volume.
+## Startup limit and retention exception
 
-The planner compares expected holding charges, save/transition charges, and return-weighted recovery charges. It uses dynamic programming over a seven-day grid with 30-second intervals initially, five-minute intervals in the medium term, and hourly intervals later. A hazard-based tail value includes continued holding/recovery cost beyond the horizon. It executes only the first action and replans after observations or at its scheduled next decision.
+The startup clock is recorded from the reopen request, including time before its startup worker begins. The existing watchdog reports failure at 180 seconds and requests a provider stop. Required setup and agent readiness must finish before the terminal is reported ready. This is not a guarantee of success through outages or arbitrary hanging user scripts.
 
-Transitions normally move toward cheaper retained states. If a retained state's measured recovery bound becomes greater than 180 seconds, the controller prewarms it. No fixed running → suspended → stopped → destroyed staircase is imposed. Predicted savings must exceed $0.00001 after transition costs to trigger an immediate state change.
+To preserve the earlier startup planning constraint, automatic cold cleanup is blocked if this deterministic conservative estimate exceeds 180 seconds:
 
-With fewer than five completed owner observations, the initial grace is 180 seconds after disconnect. This is unrelated to the separate 180-second startup deadline. After enough observations, the learned plan controls the grace period. The new user prior is explicit; this version does not perform paid randomized exploration.
+- Initial estimate: `100 + workspace_bytes / (5 * 1048576)` seconds.
+- Also consider `1.3 * duration + 5` for each of the last 30 recorded `cold` and `cold_failed` attempts; take the maximum.
+- Check both before saving and after the final save updates actual workspace size.
 
-## Startup constraint
+Thus a workspace over approximately 400 MiB is retained under the initial estimate. A slow/failed cold start can also require retention. The UI shows the reason and remaining resources continue to incur charges. This is a fixed safety exception, not learned cost optimization. These estimates are empirical assumptions, not a mathematical latency bound: changed images, scripts and provider behavior require staging measurements. Investigate slow restore/setup rather than removing the guard to force deletion. This patch does not claim arbitrary-sized workspaces always restore within three minutes.
 
-The optimizer rejects recovery options estimated to exceed 180 seconds. An opening request starts a recorded deadline. The terminal is ready only after the entrypoint environment setup and agent initialization succeed. The backend marks startup failed at the deadline and requests a provider stop. It retains data and exposes logs rather than waiting indefinitely. An independent deadline watchdog runs every second; the UI countdown reaches zero at 180 seconds. This is a deadline/error policy and planning constraint, not a guarantee that cloud outages or user scripts can be overcome in three minutes.
+## Consistency, logs and limitations
 
-## Persistence and concurrency
+Freezing provides a stable filesystem copy for ordinary sandbox-owned writers. It does not flush application buffers that only exist in RAM or guarantee application/database transaction consistency. Users must persist work inside the designated folder. The patch intentionally avoids killing processes before a save can succeed, so a failed save or pre-commit return can resume them. Do not run writers outside the supervisor's process-control scope.
 
-Terminal heartbeats and recent preview requests hold a 45-second usage lease. Logs/config UI activity does not. On expiry, one absence is recorded and decisions begin. Reopening records a return even if the Machine was already destroyed. Final save precedes destructive transitions. Regular five-minute checkpoints freeze user processes briefly and resume them afterward. Final stop/destroy first terminates user processes (10-second graceful shutdown, then kill), snapshots, verifies the commit, and only then deletes resources. Suspension preserves processes, frozen during the final checkpoint until resume. The controller decides when the transition begins; the ten-second process termination grace is a flush safeguard, not an independent idle timeout.
+Final agent logs must be acknowledged before automatic deletion. This does not promise that every last provider log line after the agent exits is captured; optional container-log polling remains separate. Agent images must be rebuilt: older agents lack the final `logs_flushed` acknowledgement and will safely block deletion.
 
-A save failure cancels destructive cleanup and records an error. If a reconnect arrives during saving, its lease prevents the pending destruction. Startup, saving and destruction are serialized per sandbox. Locks and WebSocket ownership are in process, therefore run one control-plane replica.
+## Measurements and displayed cost
 
-## Cost reporting and limitations
+The app continues collecting return intervals, save/restore/setup/readiness durations, failed startup durations, snapshots, existing provider metric imports, configured prices and lifecycle usage. It does not train predictors. `CostAccounting` owns price defaults and rate arithmetic only. Final resource-holding intervals are flushed before machine/volume deletion as well as on periodic ticks.
 
-Seeded rates are illustrative and must be replaced with actual organization/region prices in Administration. The model uses measured bytes and timing and does not assert provider host cache hits. Running/retained-state usage is sampled every minute; the UI subtotal is explicitly an estimate and excludes object requests/transfer. Exact invoice ingestion is not implemented. Maintain invoice reconciliation externally. No absolute cheapest-cost guarantee is claimed.
+The displayed estimate remains a configured-rate machine/volume subtotal, not an invoice. It excludes Tigris object requests, object storage, transfers, fixed backend/database costs, taxes and invoice adjustments. Rate defaults are illustrative and must match your allocation/region/account. New volumes record their provisioned capacity; legacy volumes fall back to `IRV_VOLUME_GB`. Provider changes outside this application are reconciled periodically and can make metering approximate. Failed Machine states are conservatively charged as compute until reconciled.
 
-Backup retention is seven days, logs thirty days, snapshots every five minutes. These are initial operating defaults, not learned parameters. Full manifests are stored as database metadata, while content chunks are in Tigris. Snapshot storage is never a full root filesystem snapshot. Unreferenced chunks have a 24-hour collection grace, and the latest selected snapshot is retained even if older than the backup window.
+## Deferred design
+
+The comment-only Java file preserves the approved action/storage choices, learned return and recovery predictions, failure handling, billing conversion, data/vector structure, training/replanning triggers, uncertainty, observation bias, safeguards and evaluation requirements. None of that file executes. Historical decision rows remain available, clearly distinguished from the new `fixed-five-minute-v1` records. This explicit deferral supersedes the previous adaptive three-minute initial grace for the active implementation.

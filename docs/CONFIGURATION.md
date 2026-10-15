@@ -1,6 +1,6 @@
 # Workspace contract
 
-The designated directory is `/home/dev/<folder_name>` in ephemeral mode. In volume mode its contents live at `/persist/<folder_name>` with a home-directory symlink. Only that directory is backed up. The folder name is a single validated component and becomes immutable after the first start; users cannot choose a host mount or an arbitrary persistence path.
+New Machines keep the designated directory at `/persist/<folder_name>` on a working volume, exposed through `/home/dev/<folder_name>` as a symlink. Legacy ephemeral Machines are retained until a verified save and cold recreation. Only that directory is backed up. The folder name is a single validated component and becomes immutable after the first start; users cannot choose a host mount or an arbitrary persistence path.
 
 `config.toml`, the entrypoint and helpers live inside this directory and are also maintained as revisioned text in the application database.
 

@@ -103,7 +103,13 @@ public class Hub extends org.springframework.web.socket.handler.AbstractWebSocke
   }
 
   void touch(String box) {
-    db.exec("UPDATE sandboxes SET lease_until=? WHERE id=?", now() + 45000, box);
+    db.exec(
+        "UPDATE sandboxes SET"
+            + " lease_until=?,idle_since=NULL,next_action_at=NULL,policy_retry_at=NULL WHERE id=?",
+        now() + 45000,
+        box);
+    db.exec(
+        "UPDATE returns SET returned_at=? WHERE sandbox_id=? AND returned_at IS NULL", now(), box);
   }
 
   @Override
@@ -141,7 +147,9 @@ public class Hub extends org.springframework.web.socket.handler.AbstractWebSocke
             return;
           }
           db.exec(
-              "UPDATE sandboxes SET state='running',ready_at=?,error=NULL,lease_until=? WHERE id=?",
+              "UPDATE sandboxes SET"
+                  + " state='running',ready_at=?,error=NULL,lease_until=?,next_action=NULL,next_action_at=NULL,policy_retry_at=NULL"
+                  + " WHERE id=?",
               now(),
               now() + 45000,
               box);
@@ -184,6 +192,7 @@ public class Hub extends org.springframework.web.socket.handler.AbstractWebSocke
   @Override
   protected void handleBinaryMessage(WebSocketSession s, BinaryMessage msg) {
     if ("preview".equals(s.getAttributes().get("kind"))) {
+      touch((String) s.getAttributes().get("box"));
       byte[] b = new byte[msg.getPayloadLength()];
       msg.getPayload().get(b);
       agentSend(
@@ -245,7 +254,10 @@ public class Hub extends org.springframework.web.socket.handler.AbstractWebSocke
       } catch (Exception ignored) {
       }
       if (clients.values().stream().noneMatch(c -> box.equals(c.getAttributes().get("box"))))
-        db.exec("UPDATE sandboxes SET lease_until=? WHERE id=?", now(), box);
+        db.log(
+            box,
+            "platform",
+            "Last terminal/preview socket closed; idle starts when its usage lease expires");
     }
   }
 }

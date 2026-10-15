@@ -45,4 +45,52 @@ class Snapshots(unittest.IsolatedAsyncioTestCase):
    a.request=req
    with self.assertRaises(RuntimeError):await a.snapshot()
    self.assertEqual(commits,[])
+
+class FinalCheckpoint(unittest.IsolatedAsyncioTestCase):
+ async def test_final_save_syncs_config_and_flushes_logs_before_ack(self):
+  from unittest.mock import patch,AsyncMock
+  with tempfile.TemporaryDirectory() as d, patch('agent.RUNTIME',pathlib.Path(d)/'runtime'):
+   a=Agent();a.root=pathlib.Path(d)/'workspace';a.root.mkdir();a.ready=True
+   (a.root/'config.toml').write_text(CONFIG)
+   (a.root/'scripts').mkdir();(a.root/'scripts/environment.sh').write_text('export TEST=ok\n')
+   a.files={'scripts/environment.sh':''};calls=[]
+   a.terminate_work=AsyncMock()
+   async def req(method,path,**kw):
+    calls.append(path)
+    if path=='/config':return {'revision':2}
+    if path=='/chunks/missing':return kw['json']
+    if path=='/snapshots':return {'snapshot':'committed'}
+    return {}
+   a.request=req;a.log('process:test','last buffered log')
+   result=await a.snapshot(final=True,shutdown=False)
+   self.assertTrue(result['verified'] and result['logs_flushed'])
+   self.assertLess(calls.index('/config'),calls.index('/snapshots'))
+   self.assertLess(calls.index('/snapshots'),calls.index('/events'))
+   self.assertFalse(a.events);self.assertTrue(a.quiesced);self.assertFalse(a.ready)
+   a.terminate_work.assert_not_awaited()
+
+ async def test_failed_log_flush_cannot_acknowledge_final_checkpoint(self):
+  from unittest.mock import patch,AsyncMock
+  with tempfile.TemporaryDirectory() as d, patch('agent.RUNTIME',pathlib.Path(d)/'runtime'):
+   a=Agent();a.root=pathlib.Path(d)/'workspace';a.root.mkdir();a.ready=True
+   a.sync_config=AsyncMock();a.unfreeze=unittest.mock.Mock()
+   async def req(method,path,**kw):
+    if path=='/snapshots':return {'snapshot':'committed'}
+    if path=='/events':raise RuntimeError('logs unavailable')
+    return {}
+   a.request=req;a.log('process:test','keep this log')
+   with self.assertRaises(RuntimeError):await a.snapshot(final=True)
+   self.assertTrue(a.events);self.assertFalse(a.quiesced);self.assertTrue(a.ready)
+   a.unfreeze.assert_called_once()
+
+ async def test_concurrent_log_flush_does_not_drop_or_duplicate_batches(self):
+  from unittest.mock import patch
+  with tempfile.TemporaryDirectory() as d, patch('agent.RUNTIME',pathlib.Path(d)/'runtime'):
+   a=Agent();a.events=[{'id':str(i)} for i in range(250)];received=[]
+   async def req(method,path,**kw):
+    await asyncio.sleep(0);received.extend(e['id'] for e in kw['json']);return {}
+   a.request=req
+   await asyncio.gather(a.flush_events(),a.flush_events())
+   self.assertEqual(received,[str(i) for i in range(250)]);self.assertFalse(a.events)
+
 if __name__=='__main__':unittest.main()

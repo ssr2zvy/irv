@@ -6,7 +6,7 @@ primary_region = "iad"
 [env]
   PORT = "8080"
   IRV_SECURE_COOKIES = "true"
-  IRV_WORKING_STORAGE = "ephemeral"
+  IRV_WORKING_STORAGE = "volume"
 [http_service]
   internal_port = 8080
   force_https = true

@@ -120,15 +120,22 @@ public class Fly {
         action.equals("stop") ? Map.of("signal", "SIGTERM", "timeout", "30s") : Map.of());
   }
 
+  void deleteIfPresent(String path) {
+    try {
+      request("DELETE", path, null);
+    } catch (IllegalStateException e) {
+      // A previous DELETE may have succeeded before the connection/backend failed.
+      if (!e.getMessage().contains("returned 404")) throw e;
+    }
+  }
+
   public void destroy(Map<String, Object> s) {
-    request(
-        "DELETE",
-        "/apps/" + s.get("app_name") + "/machines/" + s.get("machine_id") + "?force=true",
-        null);
+    deleteIfPresent(
+        "/apps/" + s.get("app_name") + "/machines/" + s.get("machine_id") + "?force=true");
   }
 
   public void deleteVolume(Map<String, Object> s) {
-    request("DELETE", "/apps/" + s.get("app_name") + "/volumes/" + s.get("volume_id"), null);
+    deleteIfPresent("/apps/" + s.get("app_name") + "/volumes/" + s.get("volume_id"));
   }
 
   public String logs(String app) {

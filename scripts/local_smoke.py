@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Run the real Java server and Python agent, using a local fake Fly API. No cloud spend."""
-import asyncio,base64,contextlib,hashlib,hmac,http.server,json,os,pathlib,secrets,signal,struct,subprocess,tempfile,threading,time,urllib.parse
+import asyncio,base64,contextlib,hashlib,hmac,http.server,json,os,pathlib,secrets,signal,struct,subprocess,tempfile,threading,time,urllib.parse,shutil
 import aiohttp
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 JAR=ROOT/'backend/target/irv-0.1.0.jar'
@@ -10,7 +10,7 @@ def otp(secret):
  return str((struct.unpack('>I',d[o:o+4])[0]&0x7fffffff)%1000000).zfill(6)
 async def main():
  with tempfile.TemporaryDirectory(prefix='irv-smoke-') as tmp:
-  d=pathlib.Path(tmp);agents=[];machines={};apps=set();agent_logs=[]
+  d=pathlib.Path(tmp);agents=[];machines={};machine_processes={};apps=set();agent_logs=[];provider_deletes=[]
   class FlyMock(http.server.BaseHTTPRequestHandler):
    def log_message(self,*args):pass
    def do_GET(self):
@@ -20,12 +20,23 @@ async def main():
    def do_POST(self):
     body=json.loads(self.rfile.read(int(self.headers.get('Content-Length',0))) or '{}')
     if self.path=='/v1/apps':apps.add('/v1/apps/'+body['app_name']);self.reply({'id':'testapp'});return
+    if self.path.endswith('/volumes'):self.reply({'id':'test-volume'});return
     if self.path.endswith('/machines'):
      mid=secrets.token_hex(7);env={**os.environ,**body['config']['env'],'IRV_ALLOW_PROCESS_CONTROL':'0','IRV_HOME':str(d/'home'),'IRV_WORKSPACE_BASE':str(d/'work'),'IRV_RUNTIME':str(d/'runtime')}
      (d/'home').mkdir(exist_ok=True);log=open(d/f'agent-{mid}.log','w');agent_logs.append(log)
-     p=subprocess.Popen(['python3',str(ROOT/'agent/agent.py')],env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);agents.append(p);machines[mid]={'id':mid,'state':'started','events':[]};self.reply(machines[mid]);return
+     p=subprocess.Popen(['python3',str(ROOT/'agent/agent.py')],env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True);agents.append(p);machine_processes[mid]=p;machines[mid]={'id':mid,'state':'started','events':[]};self.reply(machines[mid]);return
     self.reply({})
-   def do_DELETE(self):self.reply({})
+   def do_DELETE(self):
+    path=urllib.parse.urlsplit(self.path).path
+    if '/machines/' in path:
+     mid=path.split('/')[-1];p=machine_processes.pop(mid,None)
+     if p:
+      with contextlib.suppress(ProcessLookupError):os.killpg(p.pid,signal.SIGTERM)
+      with contextlib.suppress(Exception):p.wait(timeout=5)
+     machines.pop(mid,None);provider_deletes.append('machine')
+    elif '/volumes/' in path:
+     shutil.rmtree(d/'work',ignore_errors=True);provider_deletes.append('volume')
+    self.reply({})
    def reply(self,obj,status=200):
     out=json.dumps(obj).encode();self.send_response(status);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(out)));self.end_headers();self.wfile.write(out)
   mock=http.server.ThreadingHTTPServer(('127.0.0.1',0),FlyMock);threading.Thread(target=mock.serve_forever,daemon=True).start()
@@ -107,6 +118,25 @@ async def main():
     await runner.cleanup()
 
     logs=await api(prefix+'/logs');assert logs
+    # Exercise the same final-save/cleanup operation used by the fixed timer, without
+    # waiting five minutes. Timing, cancellation and retries are covered in Java checks.
+    await api(prefix+'/archive','POST')
+    for _ in range(100):
+     box=await api(prefix)
+     if box['state']=='archived':break
+     await asyncio.sleep(.2)
+    assert box['state']=='archived',box
+    assert box['machine_id'] is None and box['volume_id'] is None
+    assert provider_deletes==['machine','volume'],provider_deletes
+    assert not (d/'work').exists(),'Fake provider did not discard working volume'
+    await api(prefix+'/open','POST')
+    for _ in range(100):
+     box=await api(prefix)
+     if box['state']=='running':break
+     await asyncio.sleep(.3)
+    assert box['state']=='running',box
+    assert (d/'work/workspace/example.txt').read_text()=='persisted-value'
+    print('PASS: verified final save, log flush, machine then volume release, new volume and cold workspace restore')
     print('PASS: real server + agent: signup, TOTP, owner session, sandbox creation, startup readiness, browser PTY, chunk save, bidirectional config sync, isolated-host HTTP and WebSocket previews, persisted logs, frontend serving')
   except Exception:
    print((d/'server.log').read_text()[-6000:])

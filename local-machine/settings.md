@@ -28,18 +28,18 @@ Image catalog promotion can override initial image references in the database; s
 | Name | Default | Meaning |
 | --- | --- | --- |
 | `IRV_MACHINE_MEMORY_MB` | `4096` | Sandbox RAM; Fly adapter uses two shared CPUs. |
-| `IRV_WORKING_STORAGE` | `ephemeral` | `ephemeral` or `volume`. Operator selects working storage; the planner does not migrate the medium dynamically. |
+| `IRV_WORKING_STORAGE` | no longer read | New Machines always attach a volume. Existing Machines are not migrated live. |
 | `IRV_VOLUME_GB` | `10` | Capacity when creating a working volume; does not resize existing volumes. |
 | `IRV_MAX_SANDBOXES_PER_USER` | `5` | Maximum unarchived sandbox records per user. |
 | `IRV_STORAGE_LIMIT_GB` | `20` | Per-sandbox stored chunk limit, including chunks retained by backups. |
 | `IRV_BACKUP_DAYS` | `7` | Old snapshot retention; the currently selected snapshot is preserved. |
 | `IRV_LOG_DAYS` | `30` | Retention for logs stored by the app. |
-| `IRV_SUSPEND_ENABLED` | `true` | Set `false` to exclude suspend from planning. |
+| `IRV_SUSPEND_ENABLED` | no longer read | Adaptive state selection is deferred; the fixed policy never automatically suspends. |
 | `IRV_FLY_LOGS` | `false` in Java | Enables Fly stdout import; the backend Docker image sets `true`. Direct JAR runs need flyctl installed. |
 | `FLYCTL_PATH` | `flyctl` | Executable used for provider log import. |
 | `FLY_API_URL` | `https://api.machines.dev/v1` | Provider endpoint. Override only for controlled integration testing. |
 
-The 180-second total startup deadline and initial 180-second idle grace are code policies, not environment settings. Idle grace adapts through the optimizer; startup remains capped. Pricing inputs are stored through Administration, not environment variables. See [algorithm](../docs/ALGORITHM.md).
+The 180-second startup deadline and fixed 300-second idle period are separate code policies. Idle timing does not adapt. A conservative cold-recovery guard can retain resources; see the documented 400 MiB initial estimate and measured-duration exception. Pricing inputs are stored through Administration, not environment variables. See [algorithm](../docs/ALGORITHM.md).
 
 ## Manual staging validation
 
