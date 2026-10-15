@@ -1,5 +1,6 @@
 import unittest,tempfile,pathlib,os,hashlib,asyncio
 os.environ['IRV_ALLOW_PROCESS_CONTROL']='0'
+os.environ['IRV_DEV_UID']=str(os.getuid())
 from agent import Agent,safe_path,validate_config,CHUNK
 CONFIG='schema_version=1\nfolder_name="workspace"\nentrypoint="scripts/environment.sh"\n'
 class Paths(unittest.TestCase):
@@ -54,17 +55,19 @@ class FinalCheckpoint(unittest.IsolatedAsyncioTestCase):
    (a.root/'config.toml').write_text(CONFIG)
    (a.root/'scripts').mkdir();(a.root/'scripts/environment.sh').write_text('export TEST=ok\n')
    a.files={'scripts/environment.sh':''};calls=[]
+   async def sync():calls.append('/config-sync')
+   a.sync_config=sync
    a.terminate_work=AsyncMock()
    async def req(method,path,**kw):
     calls.append(path)
-    if path=='/config':return {'revision':2}
+    if path=='/events':return {'ack':[e['id'] for e in kw['json']]}
     if path=='/chunks/missing':return kw['json']
     if path=='/snapshots':return {'snapshot':'committed'}
     return {}
    a.request=req;a.log('process:test','last buffered log')
    result=await a.snapshot(final=True,shutdown=False)
    self.assertTrue(result['verified'] and result['logs_flushed'])
-   self.assertLess(calls.index('/config'),calls.index('/snapshots'))
+   self.assertLess(calls.index('/config-sync'),calls.index('/snapshots'))
    self.assertLess(calls.index('/snapshots'),calls.index('/events'))
    self.assertFalse(a.events);self.assertTrue(a.quiesced);self.assertFalse(a.ready)
    a.terminate_work.assert_not_awaited()
@@ -88,7 +91,7 @@ class FinalCheckpoint(unittest.IsolatedAsyncioTestCase):
   with tempfile.TemporaryDirectory() as d, patch('agent.RUNTIME',pathlib.Path(d)/'runtime'):
    a=Agent();a.events=[{'id':str(i)} for i in range(250)];received=[]
    async def req(method,path,**kw):
-    await asyncio.sleep(0);received.extend(e['id'] for e in kw['json']);return {}
+    await asyncio.sleep(0);received.extend(e['id'] for e in kw['json']);return {'ack':[e['id'] for e in kw['json']]}
    a.request=req
    await asyncio.gather(a.flush_events(),a.flush_events())
    self.assertEqual(received,[str(i) for i in range(250)]);self.assertFalse(a.events)

@@ -35,3 +35,5 @@ Back up the app database and protect `IRV_ENCRYPTION_KEY` in addition to retaini
 The local JAR stores H2 metadata under `./data`; Compose uses named PostgreSQL and blob volumes. `docker compose down -v` deletes those local volumes. Production should use PostgreSQL and Tigris, not unmounted local container storage.
 
 Historical snapshot selection is currently an API operation; see [commands.md](commands.md). The detailed workspace/sync behavior is in [configuration](../docs/CONFIGURATION.md).
+
+Managed config/script revisions, saved drafts and edit leases are app records. The protected runtime replay queue lives outside the designated snapshot under `/persist/.irv-runtime/private`; planned volume deletion requires its acknowledgement. Readable local logs rotate under `/persist/.irv-runtime/logs`. See [sync and logs](../docs/SYNC_AND_LOGS.md).

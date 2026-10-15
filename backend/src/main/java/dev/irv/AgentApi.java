@@ -142,41 +142,71 @@ public class AgentApi {
   @PostMapping("/config")
   public Object config(@RequestBody JsonNode body, HttpServletRequest r) {
     String id = agent(r);
-    return svc.config(
-        id,
-        body.path("revision").asLong(),
-        body.path("config").asText(),
-        Config.files(body.path("files")),
-        false);
+    throw conflict("Agent must use guarded edit sessions");
   }
 
   @PostMapping("/events")
   public Object events(@RequestBody JsonNode body, HttpServletRequest r) {
     String id = agent(r);
-    if (body.size() > 200) throw bad("Too many events");
-    var box = svc.get(id);
-    for (var e : body) {
-      String source = e.path("source").asText("agent"), message = e.path("message").asText();
-      if (source.length() > 100 || message.length() > 16384) throw bad("Log event too large");
-      try {
-        db.exec(
-            "INSERT INTO logs(sandbox_id,session_id,source,event_key,message,created)"
-                + " VALUES(?,?,?,?,?,?)",
-            id,
-            e.path("session").asText(str(box, "session_id")),
-            source,
-            id + ":" + e.path("id").asText(),
-            message,
-            now());
-      } catch (org.springframework.dao.DuplicateKeyException ignored) {
-      }
-    }
-    return Map.of("ok", true);
+    if (!body.isArray() || body.size() > 200) throw bad("Expected at most 200 log events");
+    return db.transaction(
+        () -> {
+          var box = db.one("SELECT session_id FROM sandboxes WHERE id=? FOR UPDATE", id);
+          var ack = new ArrayList<String>();
+          for (var e : body) {
+            String eid = e.path("id").asText(),
+                source = e.path("source").asText(),
+                message = e.path("message").asText();
+            String stream = e.path("stream").asText("system"),
+                producer = e.path("producer").asText("");
+            if (!eid.matches("[a-zA-Z0-9_-]{1,60}")
+                || source.isBlank()
+                || source.length() > 100
+                || message.length() > 16384
+                || producer.length() > 80
+                || !Set.of("stdout", "stderr", "system", "file").contains(stream))
+              throw bad("Invalid log event");
+            String key = id + ":" + eid;
+            var prior = db.one("SELECT message,source,stream FROM logs WHERE event_key=?", key);
+            if (prior != null) {
+              if (!message.equals(str(prior, "message"))
+                  || !source.equals(str(prior, "source"))
+                  || !stream.equals(str(prior, "stream")))
+                throw bad("Log ID reused with different content");
+            } else {
+              long timestamp = e.path("timestamp").asLong(now());
+              if (timestamp < 0 || timestamp > now() + 86400000L)
+                throw bad("Invalid log timestamp");
+              db.exec(
+                  "INSERT INTO"
+                      + " logs(sandbox_id,session_id,source,event_key,message,created,stream,producer,sequence_no,received_at)"
+                      + " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                  id,
+                  e.path("session").asText(str(box, "session_id")),
+                  source,
+                  key,
+                  message,
+                  timestamp,
+                  stream,
+                  producer,
+                  e.path("sequence").asLong(),
+                  now());
+            }
+            ack.add(eid);
+          }
+          db.exec("UPDATE sandboxes SET logs_ack_at=? WHERE id=?", now(), id);
+          return Map.of("ack", ack);
+        });
   }
 
   @PostMapping("/telemetry")
   public Object telemetry(@RequestBody JsonNode body, HttpServletRequest r) {
     String id = agent(r);
+    if (body.has("logs_pending"))
+      db.exec(
+          "UPDATE sandboxes SET logs_pending=? WHERE id=?",
+          Math.max(0, body.path("logs_pending").asLong()),
+          id);
     if (body.has("tree"))
       db.exec(
           "UPDATE sandboxes SET tree=?,updated=? WHERE id=?", json(body.path("tree")), now(), id);

@@ -86,6 +86,26 @@ public class SandboxApi {
     return Map.of("ok", true);
   }
 
+  @PostMapping("/sandboxes/{id}/rebuild-agent")
+  public Object rebuildAgent(@PathVariable String id, HttpServletRequest r) {
+    own(id, r);
+    svc.rebuildAgent(id);
+    return Map.of("ok", true);
+  }
+
+  @PostMapping("/sandboxes/{id}/apply")
+  public Object apply(@PathVariable String id, HttpServletRequest r) {
+    own(id, r);
+    svc.enqueue(
+        id,
+        () -> {
+          if (!hub.connected(id)) throw conflict("Start the sandbox before applying setup");
+          hub.call(id, "apply", Map.of(), 180);
+          db.log(id, "platform", "Applied environment setup and restarted user processes");
+        });
+    return Map.of("ok", true);
+  }
+
   @PostMapping("/sandboxes/{id}/stop")
   public Object stop(@PathVariable String id, HttpServletRequest r) {
     own(id, r);
@@ -103,12 +123,7 @@ public class SandboxApi {
   @PutMapping("/sandboxes/{id}/config")
   public Object config(@PathVariable String id, @RequestBody JsonNode b, HttpServletRequest r) {
     own(id, r);
-    return svc.config(
-        id,
-        b.path("revision").asLong(),
-        b.path("config").asText(),
-        Config.files(b.path("files")),
-        true);
+    throw conflict("Use an exclusive editing session through /sync");
   }
 
   @GetMapping("/sandboxes/{id}/logs")
@@ -118,6 +133,10 @@ public class SandboxApi {
       @RequestParam(defaultValue = "") String session,
       HttpServletRequest r) {
     own(id, r);
+    return logRows(id, after, session);
+  }
+
+  public Object logRows(String id, long after, String session) {
     return session.isEmpty()
         ? db.all("SELECT * FROM logs WHERE sandbox_id=? AND id>? ORDER BY id LIMIT 500", id, after)
         : db.all(
@@ -131,8 +150,10 @@ public class SandboxApi {
   public Object sessions(@PathVariable String id, HttpServletRequest r) {
     own(id, r);
     return db.all(
-        "SELECT session_id,MIN(created) AS started FROM logs WHERE sandbox_id=? GROUP BY session_id"
-            + " ORDER BY started DESC",
+        "SELECT session_id,MIN(started) AS started FROM (SELECT session_id,started FROM"
+            + " sandbox_runs WHERE sandbox_id=? UNION ALL SELECT session_id,created AS started FROM"
+            + " logs WHERE sandbox_id=?) x GROUP BY session_id ORDER BY started DESC",
+        id,
         id);
   }
 

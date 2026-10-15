@@ -1,0 +1,14 @@
+CREATE TABLE config_leases (sandbox_id VARCHAR(40) PRIMARY KEY REFERENCES sandboxes(id), editor_id VARCHAR(80), origin VARCHAR(20), secret_hash VARCHAR(64), fence BIGINT NOT NULL DEFAULT 0, expires BIGINT NOT NULL DEFAULT 0);
+CREATE TABLE config_drafts (sandbox_id VARCHAR(40) REFERENCES sandboxes(id), editor_id VARCHAR(80), version BIGINT NOT NULL DEFAULT 0, base_revision BIGINT NOT NULL, bundle TEXT NOT NULL, validation_error TEXT, updated BIGINT NOT NULL, PRIMARY KEY(sandbox_id,editor_id));
+CREATE TABLE config_versions (sandbox_id VARCHAR(40) REFERENCES sandboxes(id), revision BIGINT, bundle TEXT NOT NULL, content_hash VARCHAR(64) NOT NULL, created BIGINT NOT NULL, PRIMARY KEY(sandbox_id,revision));
+CREATE TABLE config_requests (sandbox_id VARCHAR(40) REFERENCES sandboxes(id), request_id VARCHAR(80), request_hash VARCHAR(64) NOT NULL, response TEXT NOT NULL, PRIMARY KEY(sandbox_id,request_id));
+ALTER TABLE sandboxes ADD COLUMN applied_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE sandboxes ADD COLUMN sync_error TEXT;
+ALTER TABLE sandboxes ADD COLUMN logs_pending BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE sandboxes ADD COLUMN logs_ack_at BIGINT;
+ALTER TABLE logs ADD COLUMN stream VARCHAR(20) NOT NULL DEFAULT 'system';
+ALTER TABLE logs ADD COLUMN producer VARCHAR(80);
+ALTER TABLE logs ADD COLUMN sequence_no BIGINT;
+ALTER TABLE logs ADD COLUMN received_at BIGINT;
+CREATE TABLE sandbox_runs (session_id VARCHAR(40) PRIMARY KEY, sandbox_id VARCHAR(40) REFERENCES sandboxes(id), machine_id VARCHAR(80), started BIGINT NOT NULL, ended BIGINT);
+INSERT INTO sandbox_runs(session_id,sandbox_id,machine_id,started) SELECT session_id,id,machine_id,COALESCE(started_at,created) FROM sandboxes WHERE session_id IS NOT NULL;

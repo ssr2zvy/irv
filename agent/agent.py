@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""irv sandbox supervisor. Runs unprivileged; only its sandbox-scoped token is present."""
-import asyncio, base64, contextlib, fcntl, hashlib, json, os, pathlib, pty, re, shlex
-import signal, struct, subprocess, sys, termios, time, tomllib, uuid
+"""irv sandbox supervisor. Privileged file broker; all development programs run as the unprivileged dev user."""
+import asyncio, codecs, base64, contextlib, fcntl, hashlib, json, os, pathlib, pty, re, shlex
+import signal, traceback, struct, subprocess, sys, termios, time, tomllib, uuid
 import aiohttp
+from aiohttp import web
+from managed import ManagedFiles
 
 CHUNK = 4 * 1024 * 1024
 HOME_DIR = pathlib.Path(os.environ.get('IRV_HOME', '/home/dev'))
@@ -25,7 +27,7 @@ def safe_path(root, name):
 
 def validate_config(text):
     c = tomllib.loads(text)
-    if set(c) - {'schema_version','folder_name','entrypoint','preview_ports','keywords','processes'}:
+    if set(c) - {'schema_version','folder_name','entrypoint','helpers','preview_ports','keywords','processes'}:
         raise ValueError('Unsupported configuration key')
     if c.get('schema_version') != 1 or not re.fullmatch(r'[a-zA-Z][a-zA-Z0-9_-]{0,39}', c.get('folder_name','')):
         raise ValueError('Invalid schema or workspace folder')
@@ -46,6 +48,9 @@ def atomic(path, data, mode=0o600):
         f.write(data if isinstance(data, bytes) else data.encode())
         f.flush(); os.fsync(f.fileno())
     os.chmod(tmp, mode); os.replace(tmp, path)
+    parent=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(parent)
+    finally:os.close(parent)
 
 
 class Agent:
@@ -54,8 +59,16 @@ class Agent:
         self.files = {}; self.baseline = None; self.terminals = {}; self.processes = {}
         self.frozen = []; self.env = {}; self.ready = False; self.events = []
         self.serial = asyncio.Lock(); self.event_lock = asyncio.Lock(); self.quiesced = False; self.tasks = set(); self.preview_ws = {}; self.pending_preview = {}
+        if RUNTIME.is_symlink():raise ValueError('Runtime directory cannot be a symlink')
         RUNTIME.mkdir(parents=True, exist_ok=True)
-        self.logfile = RUNTIME/'events.jsonl'
+        self.private=RUNTIME/'private';self.private.mkdir(exist_ok=True);os.chmod(self.private,0o700)
+        if self.private.is_symlink():raise ValueError('Private runtime cannot be a symlink')
+        if os.geteuid()==0:os.chown(self.private,0,0)
+        self.logfile = self.private/'events.jsonl'
+        if self.logfile.is_symlink():raise ValueError('Log spool cannot be a symlink')
+        self.archive=RUNTIME/'logs';self.archive.mkdir(exist_ok=True);os.chmod(self.archive,0o755)
+        self.producer=uuid.uuid4().hex;self.sequence=0;self.managed=None;self.local_edits={}
+        self.last_ack=0
         if self.logfile.exists():
             for line in self.logfile.read_text().splitlines():
                 with contextlib.suppress(Exception): self.events.append(json.loads(line))
@@ -63,11 +76,22 @@ class Agent:
     def task(self, coro):
         t = asyncio.create_task(coro); self.tasks.add(t); t.add_done_callback(self.tasks.discard); return t
 
-    def log(self, source, message):
-        e = dict(id=uuid.uuid4().hex, source=source, message=str(message)[:16000], session=self.session)
+    def log(self, source, message, stream='system'):
+        self.sequence+=1
+        e=dict(id=uuid.uuid4().hex,source=source,message=str(message)[:16000],session=self.session,
+               timestamp=int(time.time()*1000),stream=stream,producer=self.producer,sequence=self.sequence)
+        line=json.dumps(e)+'\n'
+        with self.logfile.open('a') as f:f.write(line);f.flush();os.fsync(f.fileno())
         self.events.append(e)
-        with self.logfile.open('a') as f: f.write(json.dumps(e)+'\n')
-        print(f'[{source}] {str(message)[:16000]}', flush=True)
+        archive=self.archive/'events.jsonl'
+        if archive.exists() and archive.stat().st_size>8*1024*1024:
+            for i in range(3,0,-1):
+                old=self.archive/f'events.{i}.jsonl'
+                if old.exists():old.replace(self.archive/f'events.{i+1}.jsonl')
+            archive.replace(self.archive/'events.1.jsonl')
+        with archive.open('a') as f:f.write(line)
+        os.chmod(archive,0o644)
+        print(f'[{source}/{stream}] {str(message)[:16000]}',flush=True)
 
     async def request(self, method, path, **kw):
         async with self.http.request(method, API+'/agent'+path, **kw) as res:
@@ -79,15 +103,34 @@ class Agent:
         if self.ws and not self.ws.closed: await self.ws.send_json(data)
 
     def bundle(self):
-        text = (self.root/'config.toml').read_text()
-        c = validate_config(text)
-        names = set(self.files) | {c['entrypoint']}
-        scripts = self.root/'scripts'
-        if scripts.is_dir():
-            names |= {str(p.relative_to(self.root)) for p in scripts.rglob('*') if p.is_file() and p.stat().st_size <= 65536}
-        if len(names)>32: raise ValueError('At most 32 startup files')
-        files = {n:safe_path(self.root,n).read_text() for n in sorted(names) if safe_path(self.root,n).is_file()}
-        return {'config':text,'files':files}
+        text=(self.root/'config.toml').read_text()
+        return {'config':text,'files':{n:safe_path(self.root,n).read_text() for n in self.files}}
+
+    def child_args(self):
+        return dict(user=int(os.environ.get('IRV_DEV_UID','1000')),group=int(os.environ.get('IRV_DEV_UID','1000')),extra_groups=[])
+
+    async def local_api(self,req):
+        try:
+            op=req.match_info['op'];body=await req.json() if req.method=='POST' else {}
+            if op=='status':return web.json_response(await self.request('GET','/sync'))
+            if op=='logs':return web.json_response(await self.request('GET','/logs?'+req.query_string))
+            if op not in ('acquire','renew','release','recover','draft','commit'):raise ValueError('Unsupported editor operation')
+            if op=='acquire':
+                async with self.serial:
+                    await self.sync_config()
+                    result=await self.request('POST','/sync/acquire',json=body)
+                    # Acquisition is serialized with DB commits. Ensure that exact revision is applied.
+                    await self.sync_config()
+                    if result['revision']!=self.revision:raise ValueError('Configuration changed during handoff; retry')
+            else:result=await self.request('POST','/sync/'+op,json=body)
+            return web.json_response(result)
+        except Exception as e:return web.json_response({'error':str(e)},status=409)
+
+    async def start_local_api(self):
+        socket=RUNTIME/'editor.sock';socket.unlink(missing_ok=True)
+        app=web.Application(client_max_size=3*1024*1024);app.router.add_route('*','/{op}',self.local_api)
+        self.local_runner=web.AppRunner(app);await self.local_runner.setup()
+        await web.UnixSite(self.local_runner,str(socket)).start();os.chown(socket,0,int(os.environ.get('IRV_DEV_UID','1000')));os.chmod(socket,0o660)
 
     def keywords(self):
         lines = ['for _irv_k in "${IRV_KEYWORD_NAMES[@]}"; do unset -f "$_irv_k"; done', 'IRV_KEYWORD_NAMES=()']
@@ -100,14 +143,17 @@ class Agent:
         source='source '+shlex.quote(str(RUNTIME/'keywords.sh'))
         atomic(RUNTIME/'bashrc', "[ -f ~/.bashrc ] && source ~/.bashrc\nexport PROMPT_COMMAND="+shlex.quote(source)+"\n"+source+"\n",0o644)
 
-    def overlay(self, data, force=False):
-        c = validate_config(data['config'])
-        if self.root and c['folder_name'] != self.root.name: raise ValueError('Folder cannot change after first start')
-        if not force and self.baseline is not None and self.bundle() != self.baseline:
-            atomic(RUNTIME/'remote-config-conflict.json',json.dumps(data)); raise ValueError('Local edits conflict with UI edits; pending remote version saved in /tmp/irv-runtime/remote-config-conflict.json')
-        atomic(self.root/'config.toml',data['config'],0o644)
-        for path,text in data['files'].items(): atomic(safe_path(self.root,path),text,0o644)
-        self.files=data['files']; self.config=c; self.revision=data['revision']; self.baseline=self.bundle(); self.keywords()
+    def overlay(self,data,force=False):
+        c=validate_config(data['config'])
+        if c['folder_name']!=self.root.name:raise ValueError('Folder name cannot change after first start')
+        if self.managed is None:self.managed=ManagedFiles(self.root,self.private/'managed',int(os.environ.get('IRV_DEV_UID','1000')))
+        already_frozen=bool(self.frozen) or self.quiesced
+        self.freeze()
+        try:
+            self.managed.apply(data,atomic)
+            self.files=data['files'];self.config=c;self.revision=data['revision'];self.baseline=self.bundle();self.keywords()
+        finally:
+            if not already_frozen:self.unfreeze()
 
     async def restore(self, manifest):
         if not manifest or not manifest.get('entries'): return
@@ -136,6 +182,9 @@ class Agent:
             p=self.root/entry['path']
             if not p.is_symlink():
                 with contextlib.suppress(OSError): os.chmod(p,entry.get('mode',0o755)&0o777);os.utime(p,ns=(entry.get('mtime_ns',time.time_ns()),)*2)
+        for entry in manifest['entries']:
+            target=self.root/entry['path'];uid=int(os.environ.get('IRV_DEV_UID','1000'))
+            if target.lstat().st_uid!=uid:os.chown(target,uid,uid,follow_symlinks=False)
         await self.request('POST','/telemetry',json={'kind':'restore','seconds':time.monotonic()-start,'bytes':sum(e.get('size',0) for e in manifest['entries'])})
 
     def user_pids(self):
@@ -143,7 +192,7 @@ class Agent:
         for p in pathlib.Path('/proc').iterdir():
             if not p.name.isdigit() or int(p.name)==os.getpid(): continue
             try:
-                if p.stat().st_uid==os.getuid() and int(p.name)>1:result.append(int(p.name))
+                if p.stat().st_uid==int(os.environ.get('IRV_DEV_UID','1000')) and int(p.name)>1:result.append(int(p.name))
             except OSError: pass
         return result
 
@@ -175,15 +224,30 @@ class Agent:
         async with self.event_lock:
             while self.events:
                 batch=self.events[:100]
-                await self.request('POST','/events',json=batch)
+                reply=await self.request('POST','/events',json=batch)
+                if reply.get('ack')!=[e['id'] for e in batch]:raise ValueError('Missing log acknowledgement; keeping replay queue')
                 del self.events[:len(batch)]
                 atomic(self.logfile,''.join(json.dumps(e)+'\n' for e in self.events))
 
     async def sync_config(self):
-        bundle=self.bundle()
-        if bundle!=self.baseline:
-            result=await self.request('POST','/config',json={**bundle,'revision':self.revision})
-            self.revision=result['revision'];self.files=bundle['files'];self.config=validate_config(bundle['config']);self.baseline=bundle;self.keywords()
+        if self.managed:self.managed.verify()
+        while True:
+            pending=await self.request('GET','/config/changes?after='+str(self.revision))
+            for v in pending['versions']:
+                data=json.loads(v['bundle'])
+                if validate_config(data['config'])['folder_name']!=self.root.name:
+                    self.revision=data['revision'];continue
+                self.overlay(data)
+                await self.request('POST','/config/ack',json={'revision':self.revision,'hash':v['content_hash']})
+                self.last_ack=self.revision
+            if self.revision>=pending['latest']:break
+            if not pending['versions']:raise ValueError('Missing configuration revision')
+        # Re-ACK after a lost response without repeating the file operation.
+        if self.last_ack!=self.revision and self.revision:
+            pending=await self.request('GET','/config/changes?after='+str(self.revision-1))
+            for v in pending['versions']:
+                if json.loads(v['bundle'])['revision']==self.revision:
+                    await self.request('POST','/config/ack',json={'revision':self.revision,'hash':v['content_hash']});self.last_ack=self.revision
 
     async def snapshot(self, final=False, shutdown=False):
         start=time.monotonic();was_ready=self.ready
@@ -212,7 +276,7 @@ class Agent:
                     else:continue # sockets, FIFOs and device nodes are runtime-only
                     entries.append(e)
                     if len(entries)>100000:raise ValueError('Workspace exceeds 100,000-entry limit')
-            result=await self.request('POST','/snapshots',json={'version':1,'entries':entries})
+            result=await self.request('POST','/snapshots',json={'version':1,'config_revision':self.revision,'entries':entries})
             self.log('save',f'Saved {total} bytes; uploaded {uploaded} new bytes; snapshot {result["snapshot"]}')
             await self.request('POST','/telemetry',json={'kind':'save','seconds':time.monotonic()-start,'bytes':uploaded})
             if final:await self.flush_events()
@@ -223,33 +287,40 @@ class Agent:
         finally:
             if not final:self.unfreeze()
 
-    async def pipe_log(self, reader, source):
+    async def pipe_log(self, reader, source, stream='stdout'):
+        decoder=codecs.getincrementaldecoder('utf-8')('replace')
         while True:
-            line=await reader.readline()
-            if not line:break
-            self.log(source,line.decode(errors='replace').rstrip())
+            chunk=await reader.read(16000)
+            text=decoder.decode(chunk,final=not chunk)
+            if text:self.log(source,text,stream)
+            if not chunk:break
 
     async def setup(self):
         start=time.monotonic();self.env={k:v for k,v in os.environ.items() if not k.startswith(('IRV_','AWS_','FLY_'))}
         self.env.update(HOME=str(HOME_DIR),USER='dev',WORKSPACE_DIR=str(self.root),TERM='xterm-256color')
-        path=safe_path(self.root,self.config['entrypoint']);out=RUNTIME/'environment.json'
+        path=safe_path(self.root,self.config['entrypoint'])
+        setupdir=RUNTIME/'setup';setupdir.mkdir(exist_ok=True);os.chown(setupdir,int(os.environ.get('IRV_DEV_UID','1000')),int(os.environ.get('IRV_DEV_UID','1000')));os.chmod(setupdir,0o700)
+        out=setupdir/'environment.json';out.unlink(missing_ok=True)
         # Source entrypoint in a shell and capture exported variables from that same shell.
         code=f'set -e; source {shlex.quote(str(path))}; python3 -c '+shlex.quote('import os,json;open('+repr(str(out))+',"w").write(json.dumps(dict(os.environ)))')
-        p=await asyncio.create_subprocess_exec('/bin/bash','-c',code,cwd=self.root,env=self.env,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.STDOUT,start_new_session=True)
-        log=self.task(self.pipe_log(p.stdout,'entrypoint'))
+        p=await asyncio.create_subprocess_exec('/bin/bash','-c',code,cwd=self.root,env=self.env,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE,start_new_session=True,**self.child_args())
+        log=self.task(self.pipe_log(p.stdout,'entrypoint'));err=self.task(self.pipe_log(p.stderr,'entrypoint','stderr'))
         try:await asyncio.wait_for(p.wait(),90)
         except asyncio.TimeoutError:os.killpg(p.pid,signal.SIGKILL);raise ValueError('Entrypoint exceeded 90-second setup budget')
-        await log
+        await asyncio.gather(log,err)
         if p.returncode!=0:raise ValueError(f'Entrypoint exited {p.returncode}')
-        self.env=json.loads(out.read_text());self.keywords()
+        fd=os.open(out,os.O_RDONLY|os.O_NOFOLLOW)
+        with os.fdopen(fd) as f:self.env=json.loads(f.read(65537))
+        if not isinstance(self.env,dict) or not all(isinstance(k,str) and isinstance(v,str) for k,v in self.env.items()):raise ValueError('Invalid setup environment')
+        out.unlink();self.keywords()
         await self.request('POST','/telemetry',json={'kind':'setup','seconds':time.monotonic()-start})
         await self.start_processes()
 
     async def start_processes(self):
         for name,spec in self.config.get('processes',{}).items():
             if name in self.processes and self.processes[name].returncode is None:continue
-            p=await asyncio.create_subprocess_exec('/bin/bash','-c',spec['command'],cwd=safe_path(self.root,spec.get('cwd','.')),env=self.env,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.STDOUT,start_new_session=True)
-            self.processes[name]=p;self.task(self.pipe_log(p.stdout,'process:'+name));self.task(self.process_end(name,p))
+            p=await asyncio.create_subprocess_exec('/bin/bash','-c',spec['command'],cwd=safe_path(self.root,spec.get('cwd','.')),env=self.env,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE,start_new_session=True,**self.child_args())
+            self.processes[name]=p;self.task(self.pipe_log(p.stdout,'process:'+name));self.task(self.pipe_log(p.stderr,'process:'+name,'stderr'));self.task(self.process_end(name,p))
             if spec.get('log_file'):self.task(self.tail_file(name,safe_path(self.root,spec['log_file']),p))
 
     async def process_end(self,name,p):
@@ -263,16 +334,16 @@ class Agent:
                 with path.open('r',errors='replace') as f:
                     f.seek(offset)
                     for _ in range(100):
-                        line=f.readline(16000)
+                        line=f.readline(8000)
                         if not line:break
-                        self.log('file:'+name,line.rstrip())
+                        self.log('file:'+name,line.rstrip(),'file')
                     offset=f.tell()
             await asyncio.sleep(1)
 
     async def terminal(self, client):
         if not self.ready:raise ValueError('Environment is not ready')
         master,slave=pty.openpty();os.set_blocking(master,False)
-        proc=subprocess.Popen(['/bin/bash','--rcfile',str(RUNTIME/'bashrc'),'-i'],cwd=self.root,env=self.env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
+        proc=subprocess.Popen(['/bin/bash','--rcfile',str(RUNTIME/'bashrc'),'-i'],cwd=self.root,env=self.env,stdin=slave,stdout=slave,stderr=slave,start_new_session=True,**self.child_args())
         os.close(slave);self.terminals[client]=(master,proc)
         loop=asyncio.get_running_loop()
         def read():
@@ -304,11 +375,18 @@ class Agent:
             else:
                 async with self.serial:
                     if op=='save':result=await self.snapshot(data.get('final',False),data.get('shutdown',False))
+                    elif op=='apply':
+                        self.ready=False
+                        await self.sync_config();await self.terminate_work()
+                        for process in self.processes.values():await process.wait()
+                        await self.setup();self.ready=True;await self.emit({'type':'ready'});result={'ok':True}
                     elif op=='config':
-                        if self.quiesced:raise ValueError('Final checkpoint in progress; app configuration remains saved for next startup')
-                        self.overlay(data);result={'revision':self.revision}
+                        await self.sync_config();result={'revision':self.revision}
                     elif op in ('resume','unfreeze'):
-                        self.unfreeze();self.quiesced=False;boot=await self.request('GET','/bootstrap');self.session=boot.get('session');self.overlay(boot);await self.start_processes();self.ready=True;await self.emit({'type':'ready'});result={'ok':True}
+                        self.unfreeze();self.quiesced=False;boot=await self.request('GET','/bootstrap');self.session=boot.get('session');await self.sync_config()
+                        if op=='resume':await self.setup()
+                        else:await self.start_processes()
+                        self.ready=True;await self.emit({'type':'ready'});result={'ok':True}
                     else:raise ValueError('Unknown operation')
             await self.emit({'type':'rpc_result','request':n['request'],'data':result})
         except Exception as e:
@@ -359,7 +437,10 @@ class Agent:
         while True:
             await asyncio.sleep(1)
             try:
-                await self.flush_events()
+                try:await self.flush_events()
+                except Exception as log_error:
+                    if str(log_error)!=last_error:self.log('log-sync',str(log_error));last_error=str(log_error)
+                await self.request('POST','/telemetry',json={'logs_pending':len(self.events)})
                 if not self.ready or self.quiesced or self.frozen:continue
                 async with self.serial:
                     await self.sync_config()
@@ -379,6 +460,7 @@ class Agent:
                 last_error=''
             except Exception as e:
                 if str(e)!=last_error:self.log('sync',str(e));last_error=str(e)
+                with contextlib.suppress(Exception):await self.request('POST','/config/ack',json={'error':str(e)})
 
     async def run(self):
         if not TOKEN:raise ValueError('IRV_AGENT_TOKEN is required')
@@ -392,8 +474,28 @@ class Agent:
             if home!=self.root and not home.exists():home.symlink_to(self.root)
             self.task(self.sync_loop())
             try:
-                await self.restore(bootstrap.get('snapshot',{}));self.overlay(bootstrap,force=True);await self.setup();self.ready=True
-            except Exception as e:self.log('startup',str(e))
+                await self.restore(bootstrap.get('snapshot',{}))
+                if (self.root/'config.toml').is_file():
+                    existing={n:safe_path(self.root,n).read_text() for n in bootstrap['files'] if safe_path(self.root,n).is_file()}
+                    old=(self.root/'config.toml').read_text()
+                    if old!=bootstrap['config'] or existing!=bootstrap['files']:
+                        await self.request('POST','/config/recovery',json={'config':old,'files':existing})
+                self.managed=ManagedFiles(self.root,self.private/'managed',int(os.environ.get('IRV_DEV_UID','1000')))
+                intent=self.managed.state/'applying.json'
+                if intent.exists():self.overlay(json.loads(intent.read_text()))
+                elif self.managed.marker.exists():
+                    marker=json.loads(self.managed.marker.read_text());self.managed.verify()
+                    self.revision=marker['revision'];self.files={n:(self.root/n).read_text() for n in marker['files'] if n!='config.toml'}
+                    self.config=validate_config((self.root/'config.toml').read_text());self.baseline=self.bundle();self.keywords()
+                else:
+                    saved_revision=bootstrap.get('snapshot',{}).get('config_revision',0)
+                    if saved_revision:
+                        versions=await self.request('GET','/config/changes?after='+str(saved_revision-1))
+                        baseline=next((json.loads(v['bundle']) for v in versions['versions'] if json.loads(v['bundle'])['revision']==saved_revision),None)
+                        if baseline is None:raise ValueError('Snapshot configuration revision is missing')
+                        self.overlay(baseline)
+                await self.sync_config();await self.start_local_api();await self.setup();self.ready=True
+            except Exception as e:self.log('startup',traceback.format_exc())
             while True:
                 try:
                     async with http.ws_connect(API.replace('https://','wss://').replace('http://','ws://')+'/ws/agent',heartbeat=15,max_msg_size=12*1024*1024) as ws:

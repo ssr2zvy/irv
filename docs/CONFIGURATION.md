@@ -8,6 +8,7 @@ New Machines keep the designated directory at `/persist/<folder_name>` on a work
 schema_version = 1
 folder_name = "workspace"
 entrypoint = "scripts/environment.sh"
+helpers = []
 preview_ports = [8080, 5173]
 
 [keywords.backend]
@@ -42,15 +43,8 @@ The agent sources the entrypoint once, captures its exported variables, then use
 
 Keyword functions are generated inside the image runtime and sourced at each shell prompt. They change the current shell directory. Changes appear at the next prompt. The UI picker uses the most recently saved directory tree, never the contents of image directories. Stale paths produce normal shell errors.
 
-Editing config/scripts:
+Editing config/scripts now uses exclusive edit sessions. Use **Edit configuration** in the app or `irv edit` in the sandbox. Managed files are protected against direct edits; the CLI edits a draft and publishes through the same lease as the web editor. Valid saves synchronize without rerunning setup. Invalid drafts remain recoverable. App and machine acknowledgement revisions are shown separately. See [SYNC_AND_LOGS.md](SYNC_AND_LOGS.md) for the complete protocol, takeover, helpers, deletion and recovery behavior.
 
-- UI writes use the displayed revision; stale revisions return HTTP 409.
-- Agent local changes are checked every second when connected.
-- If UI changes race unsynced terminal edits, the agent preserves the remote bundle in `/tmp/irv-runtime/remote-config-conflict.json` and logs a conflict. Resolve the edit explicitly; neither side silently overwrites the other.
-- Offline app edits overlay the restored workspace at startup.
-- Changed entrypoint/process commands take effect on restart; saving does not repeatedly execute scripts while you type.
-- Startup helper files under `scripts/` are discovered automatically, with a maximum of 32 files of 64 KiB each.
-
-Logs are emitted to the machine's stdout and buffered locally in `/tmp/irv-runtime/events.jsonl` until accepted by the app. The buffer is a transport spool, not an infinite local log archive. Historical logs live in the app for 30 days. Providers' machine event records are collected separately so creation failures and early exits can be inspected even when the agent never becomes ready. The Docker backend also imports recent Fly container stdout with `fly logs --json --no-tail` every 30 seconds, including early exits. Set `IRV_FLY_LOGS=true` and install flyctl when running the JAR directly. Provider log retention and polling gaps can still cause missing host logs; direct Fly logs remain available for diagnosis.
+Logs retain original timestamps/session/stream and use explicit batch acknowledgements, durable retry and deduplication. Local archives and app history are separate from the delivery queue. Stdout and stderr remain distinct. Provider diagnostics are collected outside the agent. See [SYNC_AND_LOGS.md](SYNC_AND_LOGS.md) for paths, retention and the provider polling limitation.
 
 Snapshots use 4 MiB SHA-256 chunks, with deduplication within each sandbox. Every snapshot is a complete logical file tree pointing to reusable chunks. Restoring does not replay a chain of filesystem diffs. Restore preserves regular files, directories, symlinks, permissions, and mtimes. It does not preserve extended attributes, ACLs, sparse extents, hard-link identity, sockets, device nodes, or files outside the designated directory. Database applications should shut down cleanly before final save; frozen periodic checkpoints provide filesystem consistency, not application-specific transaction guarantees.

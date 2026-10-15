@@ -154,16 +154,18 @@ public class Fly {
                       p.getInputStream().readNBytes(512 * 1024),
                       java.nio.charset.StandardCharsets.UTF_8);
                 } catch (Exception e) {
-                  return "";
+                  throw new IllegalStateException("Fly log collector unavailable", e);
                 }
               });
       if (!p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)) {
         p.destroyForcibly();
-        return "";
+        throw new IllegalStateException("Fly container log collection timed out");
       }
-      return p.exitValue() == 0 ? read.get(2, java.util.concurrent.TimeUnit.SECONDS) : "";
+      if (p.exitValue() != 0)
+        throw new IllegalStateException("Fly container log collector exited " + p.exitValue());
+      return read.get(2, java.util.concurrent.TimeUnit.SECONDS);
     } catch (Exception e) {
-      return "";
+      throw new IllegalStateException("Fly log collector unavailable", e);
     }
   }
 }

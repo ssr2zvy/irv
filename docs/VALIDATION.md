@@ -1,22 +1,21 @@
-# Fixed-policy patch validation
+# Validation of the sync and logs patch
 
-Validated locally on 2026-10-15 UTC against source from upstream commit `ae74fbbf4a267b0fc7fe21fccf3adfdd7ca499a7`.
+This report concerns the source patch based on GitHub main `2832a7f36eb77513a12dad8565d3f56903270f6f`. Tests use temporary data; no live Fly/Tigris deployment was performed.
 
-## Executed successfully for this patch
+## Executed successfully
 
-- Compiled all production Java source and `FixedPolicyChecks` with Java 17.0.20 against the 90 runtime dependency JARs extracted from the repository's existing application JAR (including Spring Framework 6.2.19).
-- **20 Java lifecycle scenarios**, executed through `FixedPolicyChecks.main`: absolute five-minute scheduling, lease-expiry timing, save/delete ordering, active-use protection, heartbeat cancellation, save failure/retry backoff, snapshot and log-flush acknowledgement guards, return during save, an actual concurrent reopen, post-save workspace growth, failed cold-start retention, partial-deletion recovery after backend restart, legacy stopped-state protection, interrupted-save recovery, mandatory volume creation, request-time startup accounting, idempotent provider deletion, final usage accounting, expired queued startup rejection and pre-queue deadline publication. The JUnit `LifecycleTest` invokes the same checks during a normal Maven build.
-- **8 Python tests**: existing path/config/incremental-snapshot/restore protections plus final config synchronization, final log acknowledgement, log-flush failure retention, and concurrent log uploader safety.
-- **2 frontend helper tests**, plus a Vite 7.3.7 production build using the already installed matching dependency tree. Vite reports existing TOML eval/externalized-stream and large-bundle warnings.
-- **Real local backend + real Python agent**, using a simulated Fly API and local blob storage: application boot and migrations, invite signup/TOTP, PTY and file writing, incremental save, two-way config synchronization, HTTP and WebSocket previews, logs, final checkpoint/log flush, Machine-then-volume deletion, new-volume creation and cold restore of the saved file. This used a temporary locally compiled executable JAR assembled with the repository's bundled runtime dependencies. The simulation disables process signal control so it cannot signal unrelated local processes; real VM process freezing still requires staging validation.
+- Compiled all Java production sources using Java 17 and the existing repository runtime dependency JARs.
+- 21 standalone Java sync/log/migration checks: competing backend instances, one lease winner, surface separation, takeover fencing, expired lease rejection, durable invalid drafts, valid revision commits, request replay, mismatched replay rejection, recovery after service recreation, ordered pending revisions, hash acknowledgements, log replay/deduplication, original timestamps/session/stream, whole-batch rollback, running-machine migration refusal, volume retention during image migration and image selection.
+- 20 existing standalone Java lifecycle checks, including final log acknowledgement before deletion, failed-save retention and retry, cancellation, volume cleanup and cold startup limits.
+- 16 Python tests discovered: 14 passed and 2 explicitly skipped because this host denies UID/GID switching and Unix-domain sockets. Passing tests cover path restrictions, incremental save/restore, failed uploads, final log flushing, concurrent uploader behavior, replay after restart, missing acknowledgements, config acknowledgement retry, separate stdout/stderr, symlink rejection and file replacement/unmanage/delete semantics.
+- Both existing frontend helper tests passed, and Vite built the updated React UI.
+- Real Spring backend plus real agent against simulated Fly and filesystem blob storage: signup/TOTP, PTY, guarded app edits, guarded terminal-protocol edits and the actual CLI with a scripted editor, competing app rejection, acknowledgement visibility, HTTP/WebSocket previews, stdout/stderr logs, verified final save/flush, machine-and-volume deletion, fresh restore, and preservation of later edits to an unmanaged helper.
+- Patch preflight/application and after-file checksums are validated on a clean source checkout, including already-applied detection.
 
-## Limits of these results
+## Scope of simulation and remaining deployment checks
 
-- A fresh `mvn clean verify` dependency resolution was blocked because the environment's configured Maven network proxy was unavailable. The full JUnit/Surefire suite and a fresh Maven dependency download were **not** run here. Run `bash scripts/build.sh` in your normal build environment; it uses `mvn clean verify` and refreshes the runnable JAR.
-- No live Fly or Tigris resources were provisioned, deleted or billed. No SMS delivery was tested. No Docker images were built or published. Complete a credentialed staging save/delete/restore cycle with the rebuilt images before applying the policy to important working data.
-- No new vulnerability scan or visual browser audit was performed. This patch does not implement the deferred environment maintenance worker or adaptive optimizer.
-- Existing provider-side outages, region capacity, arbitrary startup scripts and provider logs arriving after shutdown are not solved by local tests. The 180-second limit is a planning guard and failure deadline, not a guarantee of successful recovery.
-- One backend replica is required. The migration is additive; old retained Machines are protected rather than silently discarded. Legacy agent images lack the required final log-flush acknowledgement and block deletion until updated.
-- Displayed costs remain configured-rate machine/volume estimates, not complete provider invoices.
+The local end-to-end fixture disables process signal control and substitutes UID switching and Unix-socket transport with ordinary local execution and loopback HTTP. The production code retains privilege dropping and a protected Unix socket; the fixture is not copied into images. This host cannot establish real Linux cross-user enforcement. The included permission and socket tests must be run in the sandbox image before deployment.
 
-The source patch excludes rebuilt binary JARs and generated UI assets. Rebuild from patched source. The packaged application instructions explain upgrade order and preservation of existing work.
+The local runnable JAR was assembled temporarily from freshly compiled classes/resources and the existing repository runtime dependencies. It is not shipped in the patch. `mvn -o test` could not resolve the uncached Spring Boot parent POM; a full fresh Maven/Surefire run was not completed here. Run `bash scripts/build.sh` in the normal build environment. Java standalone harnesses also have JUnit wrappers for that build.
+
+No live Fly API/container-log feed, Tigris service, PostgreSQL server, SMS provider, image build or interactive browser rendering was exercised here. Provider log polling is explicitly best-effort and distinct from the agent's acknowledged replay protocol. Use the staging checklist in `README_APPLY.md` before production.
