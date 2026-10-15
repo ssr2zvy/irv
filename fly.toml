@@ -1,6 +1,8 @@
-# Private app; the separate iruvu-tunnel app reaches the status listener on 8081.
+# One private Machine: supervised Java + cloudflared. No public Fly service.
 app = "iruvu"
 primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "60s"
 [build]
   dockerfile = "ci-cd/Containerfile"
 [env]
@@ -14,6 +16,7 @@ primary_region = "iad"
   IRV_SECURE_COOKIES = "false"
   IRV_FLY_LOGS = "false"
   IRV_PUBLIC_STATUS_ENABLED = "true"
+  IRV_TUNNEL_ENABLED = "true"
 
 # External services are not required for this private boot/UI test.
 # DATABASE_URL / DATABASE_USER / DATABASE_PASSWORD: later PostgreSQL setup.
@@ -31,17 +34,12 @@ primary_region = "iad"
   cpus = 1
   memory = "1024mb"
 
-# No public Fly service. Cloudflare routes only to http://iruvu.internal:8081.
-[checks.status]
-  type = "http"
-  port = 8081
-  grace_period = "60s"
-  interval = "30s"
-  timeout = "5s"
-  method = "GET"
-  path = "/"
+# TUNNEL_TOKEN is a Fly runtime secret on iruvu, not a build argument.
+# No public Fly service. Cloudflare routes to http://127.0.0.1:8081.
+[[restart]]
+  policy = "always"
 
-# Independently check private application startup.
+# Combined readiness: Java returns 503 if the local tunnel is disconnected.
 [checks.boot]
   type = "http"
   port = 8080

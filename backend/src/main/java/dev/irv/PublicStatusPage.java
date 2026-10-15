@@ -26,8 +26,8 @@ public class PublicStatusPage {
     return factory -> {
       Connector connector = new Connector(TomcatServletWebServerFactory.DEFAULT_PROTOCOL);
       connector.setPort(PORT);
-      // Fly .internal DNS returns private IPv6 addresses across Machines.
-      connector.setProperty("address", "::");
+      // Only the colocated connector should reach this temporary page.
+      connector.setProperty("address", "127.0.0.1");
       factory.addAdditionalTomcatConnectors(connector);
     };
   }
