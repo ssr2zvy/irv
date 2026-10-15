@@ -7,18 +7,20 @@ kill_timeout = "60s"
   dockerfile = "ci-cd/Containerfile"
 [env]
   PORT = "8080"
-  SPRING_PROFILES_ACTIVE = "first-deploy"
+  SPRING_PROFILES_ACTIVE = "auth-only"
   IRV_DATA_DIR = "/data"
   IRV_BLOB_DIR = "/data/blobs"
-  IRV_PUBLIC_ORIGIN = "http://localhost:8080"
-  IRV_PREVIEW_ORIGIN = "http://localhost:8080"
-  # Application cookies remain limited to the private local HTTP proxy.
-  IRV_SECURE_COOKIES = "false"
+  IRV_PUBLIC_ORIGIN = "https://iruvu.space"
+  IRV_PREVIEW_ORIGIN = "https://iruvu.space"
+  # Browser-facing HTTPS requires secure cookies despite the local HTTP hop.
+  IRV_SECURE_COOKIES = "true"
   IRV_FLY_LOGS = "false"
-  IRV_PUBLIC_STATUS_ENABLED = "true"
+  IRV_PUBLIC_STATUS_ENABLED = "false"
   IRV_TUNNEL_ENABLED = "true"
 
-# External services are not required for this private boot/UI test.
+# Auth-only preparation: no database, Tigris, provisioning, or Auth0 required to boot.
+# Optional certificate diagnostics: IRV_AUTH_INGRESS_SECRET and
+# IRV_AUTH_ALLOWED_CERT_SHA256; see docs/auth-only-testing.md.
 # DATABASE_URL / DATABASE_USER / DATABASE_PASSWORD: later PostgreSQL setup.
 # S3_BUCKET / S3_ENDPOINT / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY: later Tigris setup.
 # FLY_API_TOKEN / FLY_ORG / IRV_BLANK_IMAGE / IRV_JAVA_IMAGE: later sandbox provisioning.

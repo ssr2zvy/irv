@@ -1,3 +1,5 @@
+> **Current mode: auth-only.** `fly.toml` now selects the isolated authentication diagnostic runtime. See [auth-only testing](../docs/auth-only-testing.md) for endpoints, optional certificate forwarding, and unimplemented authentication stages. Earlier first-deploy database/temporary-page details below describe the prior mode. The single-app tunnel deployment mechanism is unchanged.
+
 # One Fly app: iruvu
 
 This replaces the separate connector deployment. One iruvu Machine runs Java and cloudflared, supervised together. The existing workflow deploys/stops both. No iruvu-tunnel app or second deployment credential is required.

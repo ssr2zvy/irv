@@ -1,5 +1,7 @@
 package dev.irv;
 
+import org.springframework.context.annotation.Profile;
+
 import static dev.irv.Util.*;
 
 import com.fasterxml.jackson.databind.*;
@@ -8,6 +10,7 @@ import java.util.concurrent.*;
 import org.springframework.scheduling.annotation.*;
 import org.springframework.stereotype.*;
 
+@Profile("!auth-only")
 @Service
 public class SandboxService {
   final Db db;

@@ -1,5 +1,7 @@
 package dev.irv;
 
+import org.springframework.context.annotation.Profile;
+
 import static dev.irv.Util.*;
 
 import com.fasterxml.jackson.databind.*;
@@ -8,6 +10,7 @@ import java.io.*;
 import java.util.*;
 import org.springframework.web.bind.annotation.*;
 
+@Profile("!auth-only")
 @RestController
 @RequestMapping("/agent")
 public class AgentApi {

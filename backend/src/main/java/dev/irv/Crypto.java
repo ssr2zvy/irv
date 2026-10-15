@@ -1,5 +1,7 @@
 package dev.irv;
 
+import org.springframework.context.annotation.Profile;
+
 import java.nio.*;
 import java.nio.charset.StandardCharsets;
 import java.security.*;
@@ -8,6 +10,7 @@ import javax.crypto.*;
 import javax.crypto.spec.*;
 import org.springframework.stereotype.*;
 
+@Profile("!auth-only")
 @Component
 public class Crypto {
   private final byte[] key;
