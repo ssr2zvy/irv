@@ -212,7 +212,7 @@ public class SandboxApi {
           if (v == null || !Double.isFinite(v) || v < 0) throw bad("Invalid price");
           db.exec("UPDATE prices SET value=?,updated=? WHERE name=?", v, now(), k);
         });
-    db.exec("UPDATE sandboxes SET next_action_at=NULL");
+
     return Map.of("ok", true);
   }
 

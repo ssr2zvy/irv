@@ -13,16 +13,18 @@ public class SandboxService {
   final Db db;
   final Fly fly;
   final Hub hub;
-  final Optimizer optimizer;
+  final CostAccounting accounting;
+  final FixedLifecyclePolicy policy;
   final ExecutorService work = Executors.newFixedThreadPool(4);
   final ConcurrentMap<String, Object> locks = new ConcurrentHashMap<>();
   final Set<String> busy = ConcurrentHashMap.newKeySet();
 
-  public SandboxService(Db d, Fly f, Hub h, Optimizer o) {
+  public SandboxService(Db d, Fly f, Hub h, CostAccounting a, FixedLifecyclePolicy p) {
     db = d;
     fly = f;
     hub = h;
-    optimizer = o;
+    accounting = a;
+    policy = p;
   }
 
   public Map<String, Object> get(String id) {
@@ -89,9 +91,21 @@ public class SandboxService {
   }
 
   public void open(String id) {
-    db.exec("UPDATE sandboxes SET lease_until=? WHERE id=?", now() + 60000, id);
+    long requestedAt = now();
+    // Publish the return before waiting for the lifecycle lock, so an in-flight save cancels.
+    db.exec(
+        "UPDATE sandboxes SET"
+            + " lease_until=?,idle_since=NULL,next_action_at=NULL,policy_retry_at=NULL WHERE id=?",
+        requestedAt + 60000,
+        id);
     synchronized (lock(id)) {
       var s = get(id);
+      // Once deletion is committed, finish that operation before recreating. It is no
+      // longer safe to reuse a machine whose provider DELETE might already have succeeded.
+      if (str(s, "state").equals("deleting")) {
+        finishCleanup(id);
+        s = get(id);
+      }
       db.exec(
           "UPDATE sandboxes SET lease_until=?,idle_since=NULL,next_action_at=NULL WHERE id=?",
           now() + 60000,
@@ -100,7 +114,16 @@ public class SandboxService {
           "UPDATE returns SET returned_at=? WHERE sandbox_id=? AND returned_at IS NULL", now(), id);
       if (str(s, "state").equals("running") && hub.connected(id)) return;
       if (str(s, "state").equals("starting") || busy.contains(id)) return;
-      enqueue(id, () -> start(id));
+      String source = str(s, "machine_id").isEmpty() ? "cold" : str(s, "state");
+      if (source.equals("running")) source = "stopped";
+      meterOne(s, now());
+      // Publish the deadline before queueing so the watchdog covers executor wait time.
+      db.exec(
+          "UPDATE sandboxes SET state='starting',started_at=?,next_action=?,error=NULL WHERE id=?",
+          requestedAt,
+          source,
+          id);
+      enqueue(id, () -> start(id, requestedAt));
     }
   }
 
@@ -113,9 +136,10 @@ public class SandboxService {
               fn.run();
             } catch (Exception e) {
               db.exec(
-                  "UPDATE sandboxes SET error=?,next_action_at=? WHERE id=?",
+                  "UPDATE sandboxes SET error=?,policy_retry_at=?,next_action_at=? WHERE id=?",
                   e.getMessage(),
-                  now() + 60000,
+                  now() + FixedLifecyclePolicy.RETRY_MILLIS,
+                  now() + FixedLifecyclePolicy.RETRY_MILLIS,
                   id);
               db.log(id, "platform", e.getMessage());
             } finally {
@@ -126,15 +150,25 @@ public class SandboxService {
   }
 
   void start(String id) {
+    start(id, now());
+  }
+
+  void start(String id, long requestedAt) {
     var s = get(id);
-    String from = str(s, "state");
+    if (now() - requestedAt >= FixedLifecyclePolicy.STARTUP_MILLIS)
+      throw conflict("Startup deadline elapsed before resource creation; reopen to retry");
+    String from =
+        str(s, "state").equals("starting")
+            ? str(s, "next_action")
+            : (str(s, "machine_id").isEmpty() ? "cold" : str(s, "state"));
     if (from.equals("running")) from = "stopped";
+    meterOne(s, now());
     String session = id();
     db.exec(
         "UPDATE sandboxes SET"
-            + " state='starting',started_at=?,session_id=?,next_action=?,error=NULL,updated=? WHERE"
-            + " id=?",
-        now(),
+            + " state='starting',started_at=?,session_id=?,next_action=?,next_action_at=NULL,policy_retry_at=NULL,error=NULL,updated=?"
+            + " WHERE id=?",
+        requestedAt,
         session,
         from,
         now(),
@@ -156,11 +190,18 @@ public class SandboxService {
     db.exec("UPDATE sandboxes SET agent_hash=? WHERE id=?", hash(token), id);
     String volume = str(s, "volume_id");
     fly.ensureApp(str(s, "app_name"));
-    if (volume.isEmpty() && env("IRV_WORKING_STORAGE", "ephemeral").equals("volume")) {
+    if (volume.isEmpty()) {
       volume = fly.volume(s);
-      db.exec("UPDATE sandboxes SET volume_id=? WHERE id=?", volume, id);
+      if (volume.isBlank()) throw conflict("Fly did not return a volume ID");
+      meterOne(get(id), now());
+      db.exec(
+          "UPDATE sandboxes SET volume_id=?,volume_gb=? WHERE id=?",
+          volume,
+          num("IRV_VOLUME_GB", 10),
+          id);
     }
     var m = fly.create(get(id), token, volume);
+    meterOne(get(id), now());
     db.exec(
         "UPDATE sandboxes SET machine_id=?,updated=? WHERE id=?", m.path("id").asText(), now(), id);
     db.log(id, "provider", json(m.path("events")));
@@ -177,56 +218,109 @@ public class SandboxService {
   }
 
   void transition(String id, String target) {
+    if (!Set.of("cold", "stopped").contains(target)) throw bad("Unsupported fixed-policy action");
     var s = get(id);
-    if (lng(s, "lease_until") > now()) return;
-    String current = str(s, "state");
-    if (target.equals(current)) return;
-    if (target.equals("running")) {
-      start(id);
+    if (str(s, "state").equals("deleting")) {
+      finishCleanup(id);
       return;
     }
-    db.log(id, "optimizer", "Transition " + current + " → " + target);
-    if (current.equals("running")) {
-      db.exec("UPDATE sandboxes SET state='saving' WHERE id=?", id);
-      try {
-        var saved =
-            hub.call(
-                id, "save", Map.of("final", true, "shutdown", !target.equals("suspended")), 180);
-        if (!saved.path("verified").asBoolean()
-            || get(id).get("snapshot_id") == null
-            || !saved.path("snapshot").asText().equals(str(get(id), "snapshot_id")))
-          throw conflict("Save not verified; retaining environment");
-      } catch (Exception e) {
-        db.exec("UPDATE sandboxes SET state='running' WHERE id=?", id);
-        try {
-          hub.call(id, "unfreeze", Map.of(), 10);
-        } catch (Exception ignored) {
-        }
-        throw e;
-      }
+    if (lng(s, "lease_until") > now()) return;
+    if (target.equals(str(s, "state"))) return;
+    // Old stopped/suspended records might contain changes newer than their last snapshot.
+    // Never infer final-save completion merely from the existence of any snapshot.
+    if (!str(s, "state").equals("running"))
+      throw conflict("Reopen the retained environment before saving and releasing its resources");
+    if (target.equals("cold")) policy.requireColdRecovery(s);
+    db.log(id, "lifecycle", "Fixed policy: final save before " + target);
+    db.exec("UPDATE sandboxes SET state='saving' WHERE id=?", id);
+    try {
+      // Freeze, do not kill. If storage fails or the user returns, work can continue.
+      var saved = hub.call(id, "save", Map.of("final", true, "shutdown", false), 180);
       s = get(id);
+      if (!saved.path("verified").asBoolean()
+          || !saved.path("logs_flushed").asBoolean()
+          || str(s, "snapshot_id").isEmpty()
+          || !saved.path("snapshot").asText().equals(str(s, "snapshot_id")))
+        throw conflict(
+            "Final save/log flush not verified; retaining environment (rebuild sandbox images if"
+                + " needed)");
       if (lng(s, "lease_until") > now()) {
-        hub.call(id, "unfreeze", Map.of(), 20);
-        db.exec("UPDATE sandboxes SET state='running' WHERE id=?", id);
+        cancelSave(id);
         return;
       }
+      if (target.equals("cold"))
+        policy.requireColdRecovery(s); // size may have grown since last checkpoint
+      if (target.equals("stopped")) {
+        fly.action(s, "stop");
+        meterOne(s, now());
+        db.exec(
+            "UPDATE sandboxes SET"
+                + " state='stopped',next_action=NULL,next_action_at=NULL,policy_retry_at=NULL,updated=?"
+                + " WHERE id=?",
+            now(),
+            id);
+        return;
+      }
+      // Atomic commit point: earlier returns cancel, later returns finish cleanup then recreate.
+      if (db.exec(
+              "UPDATE sandboxes SET"
+                  + " state='deleting',cleanup_snapshot_id=?,cleanup_target='cold',next_action='cold',next_action_at=NULL"
+                  + " WHERE id=? AND state='saving' AND lease_until<=?",
+              str(s, "snapshot_id"),
+              id,
+              now())
+          != 1) {
+        cancelSave(id);
+        return;
+      }
+    } catch (Exception e) {
+      if (str(get(id), "state").equals("saving")) cancelSave(id);
+      throw e;
     }
-    if (s.get("snapshot_id") == null)
-      throw conflict("No verified snapshot; cannot discard machine state");
-    if (target.equals("suspended") || target.equals("stopped")) {
-      fly.action(s, target.equals("suspended") ? "suspend" : "stop");
-    } else if (target.equals("volume") || target.equals("cold")) {
-      if (!str(s, "machine_id").isEmpty()) {
-        fly.destroy(s);
-        db.exec("UPDATE sandboxes SET machine_id=NULL,agent_hash=NULL WHERE id=?", id);
-      }
-      if (target.equals("cold") && !str(s, "volume_id").isEmpty()) {
-        fly.deleteVolume(s);
-        db.exec("UPDATE sandboxes SET volume_id=NULL WHERE id=?", id);
-      }
+    finishCleanup(id);
+  }
+
+  void cancelSave(String id) {
+    try {
+      hub.call(id, "unfreeze", Map.of(), 20);
+    } catch (Exception e) {
+      db.exec(
+          "UPDATE sandboxes SET state='failed',error=? WHERE id=?",
+          "Unfreeze failed; reopen environment: " + e.getMessage(),
+          id);
+      throw e;
     }
     db.exec(
-        "UPDATE sandboxes SET state=?,next_action_at=NULL,updated=? WHERE id=?", target, now(), id);
+        "UPDATE sandboxes SET state='running',next_action=NULL,next_action_at=NULL WHERE id=?", id);
+  }
+
+  void finishCleanup(String id) {
+    var s = get(id);
+    if (!str(s, "state").equals("deleting")) return;
+    if (str(s, "cleanup_snapshot_id").isEmpty()
+        || db.one(
+                "SELECT id FROM snapshots WHERE id=? AND sandbox_id=?",
+                s.get("cleanup_snapshot_id"),
+                id)
+            == null) throw conflict("Cleanup snapshot missing; retaining remaining resources");
+    if (!str(s, "machine_id").isEmpty()) {
+      fly.destroy(s);
+      meterOne(s, now());
+      db.exec("UPDATE sandboxes SET machine_id=NULL,agent_hash=NULL WHERE id=?", id);
+    }
+    s = get(id);
+    if (!str(s, "volume_id").isEmpty()) {
+      fly.deleteVolume(s);
+      meterOne(s, now());
+      db.exec("UPDATE sandboxes SET volume_id=NULL,volume_gb=NULL WHERE id=?", id);
+    }
+    db.exec(
+        "UPDATE sandboxes SET"
+            + " state='cold',cleanup_snapshot_id=NULL,cleanup_target=NULL,next_action=NULL,next_action_at=NULL,policy_retry_at=NULL,error=NULL,updated=?"
+            + " WHERE id=?",
+        now(),
+        id);
+    db.log(id, "lifecycle", "Final snapshot retained; machine and working volume released");
   }
 
   public void stop(String id) {
@@ -246,7 +340,8 @@ public class SandboxService {
             try {
               var s = get(id);
               if (!str(s, "state").equals("cold")) transition(id, "cold");
-              db.exec("UPDATE sandboxes SET state='archived' WHERE id=?", id);
+              if (str(get(id), "state").equals("cold"))
+                db.exec("UPDATE sandboxes SET state='archived' WHERE id=?", id);
             } catch (Exception e) {
               db.log(id, "platform", "Archive failed: " + e.getMessage());
             }
@@ -264,13 +359,22 @@ public class SandboxService {
                   + " deadline' WHERE id=? AND state='starting'",
               id)
           == 1) {
+        db.exec(
+            "INSERT INTO measurements VALUES(?,?,?,?,?,?)",
+            id(),
+            id,
+            str(s, "next_action") + "_failed",
+            (now() - lng(s, "started_at")) / 1000.0,
+            lng(s, "bytes"),
+            now());
         db.log(id, "platform", "Startup deadline exceeded; inspect startup logs");
         work.submit(
             () -> {
               synchronized (lock(id)) {
                 try {
                   var b = get(id);
-                  if (!str(b, "machine_id").isEmpty()) fly.action(b, "stop");
+                  if (str(b, "state").equals("failed") && !str(b, "machine_id").isEmpty())
+                    fly.action(b, "stop");
                 } catch (Exception e) {
                   db.log(id, "provider", e.getMessage());
                 }
@@ -280,34 +384,69 @@ public class SandboxService {
     }
   }
 
-  @Scheduled(fixedDelay = 10000)
+  @Scheduled(fixedDelay = 1000)
   public void tick() {
-    for (var s : db.all("SELECT * FROM sandboxes")) {
-      String id = str(s, "id"), state = str(s, "state");
+    for (var original : db.all("SELECT * FROM sandboxes")) {
+      String id = str(original, "id");
       if (busy.contains(id)) continue;
-      if (state.equals("starting")) continue;
-      if (!Set.of("running", "suspended", "stopped", "volume").contains(state)) continue;
-      if (lng(s, "lease_until") > now()) continue;
-      if (s.get("idle_since") == null) {
-        db.exec("UPDATE sandboxes SET idle_since=? WHERE id=?", now(), id);
-        db.exec("INSERT INTO returns VALUES(?,?,?,?,NULL)", id(), id, s.get("owner_id"), now());
-        s = get(id);
-      }
-      if (s.get("next_action_at") != null && lng(s, "next_action_at") > now()) continue;
-      try {
-        var choice = optimizer.decide(s);
-        db.exec("INSERT INTO decisions VALUES(?,?,?,?)", id(), id, json(choice), now());
-        db.exec(
-            "UPDATE sandboxes SET next_action=?,next_action_at=? WHERE id=?",
-            choice.action(),
-            now() + Math.max(10, (long) choice.delay()) * 1000,
-            id);
-        if (choice.delay() <= 10 && !choice.action().equals(state)) {
-          String action = choice.action();
-          enqueue(id, () -> transition(id, action));
+      synchronized (lock(id)) {
+        var s = get(id);
+        String state = str(s, "state");
+        if (lng(s, "policy_retry_at") > now()) continue;
+        if (state.equals("deleting")) {
+          enqueue(id, () -> finishCleanup(id));
+          continue;
         }
-      } catch (Exception e) {
-        db.log(id, "optimizer", e.getMessage());
+        // Recover an interrupted checkpoint after a control-plane restart. Without a
+        // persisted cleanup commit it must be unfrozen and saved again, never deleted.
+        if (state.equals("saving")) {
+          enqueue(id, () -> cancelSave(id));
+          continue;
+        }
+        if (!state.equals("running") || lng(s, "lease_until") > now()) continue;
+        if (s.get("idle_since") == null) {
+          long leftAt = lng(s, "lease_until") > 0 ? lng(s, "lease_until") : now();
+          if (db.exec(
+                  "UPDATE sandboxes SET idle_since=? WHERE id=? AND idle_since IS NULL AND"
+                      + " lease_until<=?",
+                  leftAt,
+                  id,
+                  now())
+              != 1) continue;
+          db.exec("INSERT INTO returns VALUES(?,?,?,?,NULL)", id(), id, s.get("owner_id"), leftAt);
+          s = get(id);
+        }
+        long due = policy.saveAt(s);
+        if (!"cold".equals(s.get("next_action")) || lng(s, "next_action_at") != due) {
+          var detail =
+              Map.of(
+                  "policy",
+                  "fixed-five-minute-v1",
+                  "action",
+                  "cold",
+                  "delay",
+                  Math.max(0, (due - now()) / 1000.0),
+                  "at",
+                  due,
+                  "reason",
+                  "Five minutes idle, then verified save and resource release; adaptive optimizer"
+                      + " deferred");
+          db.exec("INSERT INTO decisions VALUES(?,?,?,?)", id(), id, json(detail), now());
+          db.exec(
+              "UPDATE sandboxes SET next_action='cold',next_action_at=? WHERE id=? AND idle_since"
+                  + " IS NOT NULL AND lease_until<=?",
+              due,
+              id,
+              now());
+        }
+        if (now() >= due)
+          enqueue(
+              id,
+              () -> {
+                var current = get(id);
+                if (current.get("idle_since") != null && now() >= policy.saveAt(current))
+                  transition(id, "cold");
+              });
       }
     }
   }
@@ -337,7 +476,7 @@ public class SandboxService {
         if (Set.of("stopped", "failed", "destroyed").contains(state)
             && "running".equals(s.get("state"))) {
           db.exec(
-              "UPDATE sandboxes SET state=?,error=? WHERE id=?",
+              "UPDATE sandboxes SET state=?,error=? WHERE id=? AND state='running'",
               state.equals("destroyed") ? "failed" : state,
               "Machine exited; inspect provider logs",
               id);
@@ -350,24 +489,33 @@ public class SandboxService {
 
   @Scheduled(fixedDelay = 60000)
   public void meter() {
-    long now = now();
-    for (var s : db.all("SELECT * FROM sandboxes")) {
-      String id = str(s, "id"), key = "meter:" + id;
-      var prev = db.one("SELECT value FROM settings WHERE name=?", key);
-      if (prev == null) {
-        db.exec("INSERT INTO settings VALUES(?,?)", key, "" + now);
-        continue;
+    for (var s : db.all("SELECT id FROM sandboxes")) {
+      String id = str(s, "id");
+      synchronized (lock(id)) {
+        meterOne(get(id), now());
       }
-      double secs = Math.min(3600, (now - Long.parseLong(str(prev, "value"))) / 1000.0);
+    }
+  }
+
+  // Flush the final interval before releasing resources, as well as on periodic ticks.
+  // Configured-rate estimates still exclude object requests, transfer and invoice adjustments.
+  void meterOne(Map<String, Object> s, long time) {
+    String id = str(s, "id"), key = "meter:" + id;
+    var prev = db.one("SELECT value FROM settings WHERE name=?", key);
+    if (prev == null) {
+      db.exec("INSERT INTO settings VALUES(?,?)", key, "" + time);
+      return;
+    }
+    double seconds = Math.max(0, (time - Long.parseLong(str(prev, "value"))) / 1000.0);
+    if (seconds > 0)
       db.exec(
           "INSERT INTO usage VALUES(?,?,?,?,?,?)",
           id(),
           id,
           s.get("state"),
-          secs,
-          secs * optimizer.rate(s, str(s, "state")),
-          now);
-      db.exec("UPDATE settings SET value=? WHERE name=?", "" + now, key);
-    }
+          seconds,
+          seconds * accounting.rate(s, str(s, "state")),
+          time);
+    db.exec("UPDATE settings SET value=? WHERE name=?", "" + time, key);
   }
 }

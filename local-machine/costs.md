@@ -20,7 +20,7 @@ Tigris stores incremental workspace chunks. Charges depend on retained object st
 
 **Billing:** Your selected PostgreSQL provider's dashboard; Fly billing if hosted there.
 
-The database stores accounts, invites, configuration, snapshot manifests, logs, usage, and optimizer history. Budget for the database service, storage, backups, and any applicable transfer. No managed database subscription is selected or provisioned by the ZIP. Local H2 and Compose PostgreSQL use your own machine's resources.
+The database stores accounts, invites, configuration, snapshot manifests, logs, usage, and lifecycle history. Budget for the database service, storage, backups, and any applicable transfer. No managed database subscription is selected or provisioned by the ZIP. Local H2 and Compose PostgreSQL use your own machine's resources.
 
 ## GitHub Actions and container packages
 
@@ -44,6 +44,6 @@ Budget for the preview domain and its renewal, plus any paid DNS/TLS services. C
 
 ## What the app's cost figure means
 
-Administration prices feed a sandbox cost estimate, not a complete invoice. Enter rates applicable to your region/account and reconcile them with provider bills. Shared backend, database, CI, domains, and optional SMS costs must also be counted for an end-to-end total. The optimizer neither guarantees the cheapest possible result nor automatically imports every provider's billing rates.
+Administration prices feed a sandbox cost estimate, not a complete invoice. Enter rates applicable to your region/account and reconcile them with provider bills. Shared backend, database, CI, domains, and optional SMS costs must also be counted for an end-to-end total. The fixed policy does not optimize cost or automatically import billing rates. Adaptive optimization is deferred.
 
 Pricing references checked 2026-10-14. This file intentionally contains no fixed dollar estimates that could be mistaken for your account's rates.

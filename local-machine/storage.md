@@ -18,13 +18,13 @@
 
 Files are split into 4 MiB SHA-256 chunks, deduplicated within each sandbox. Each snapshot stores a complete logical manifest referring to chunks; restoring does not replay a chain of diffs. The image's shared layers are handled separately by the container registry/runtime.
 
-Only the designated workspace is covered. File contents, directories, symlinks, modes, and modification times are preserved; ACLs, extended attributes, hard-link identity, sparse extents, devices, and sockets are not. Periodic snapshots freeze processes for filesystem consistency. Final saves terminate managed/user processes before saving; application-specific database consistency still requires clean shutdown behavior.
+Only the designated workspace is covered. File contents, directories, symlinks, modes, and modification times are preserved; ACLs, extended attributes, hard-link identity, sparse extents, devices, and sockets are not. Periodic snapshots freeze processes for filesystem consistency. Final saves freeze work, verify the snapshot and flush pending agent logs before releasing resources; application-specific database consistency still requires application-level persistence. A failed final save unfreezes work.
 
 Daily cleanup removes snapshots older than `IRV_BACKUP_DAYS` (default 7), except the currently selected snapshot. Unreferenced chunks older than one day are eligible for collection. Retained backups can therefore occupy storage even after files are removed from the live workspace.
 
 ## Lifecycle and deletion
 
-The optimizer can retain a running/stopped/suspended Machine, retain an existing volume, or destroy resources after a verified snapshot. A failed or mismatched save acknowledgement blocks destructive cleanup. Working storage mode is operator-selected; automatic migration between ephemeral storage and a volume is not implemented.
+The active policy keeps a working volume while running, waits five idle minutes, then saves and releases the Machine and volume. Save/log failures, returns before deletion commits, and the conservative recovery guard block automatic deletion. Manual Stop retains its volume. Legacy retained states require reopening; there is no live working-disk migration. Adaptive optimization is deferred.
 
 Archiving a sandbox removes it from the active list/quota but retains its metadata and selected snapshot. It is not a permanent data-erasure operation. Deleting a Fly resource manually does not remove Tigris chunks or database records, and can lose unsaved work.
 

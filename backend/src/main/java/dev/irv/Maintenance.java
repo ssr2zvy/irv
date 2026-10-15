@@ -49,14 +49,15 @@ public class Maintenance {
   @Scheduled(cron = "0 17 3 * * *", zone = "UTC")
   public void cleanup() {
     long cutoff = now() - num("IRV_BACKUP_DAYS", 7) * 86400000L;
-    for (var s : db.all("SELECT id,snapshot_id FROM sandboxes")) {
+    for (var s : db.all("SELECT id,snapshot_id,cleanup_snapshot_id FROM sandboxes")) {
       String id = str(s, "id");
       synchronized (blobs.lock(id)) {
         db.exec(
-            "DELETE FROM snapshots WHERE sandbox_id=? AND created<? AND id<>?",
+            "DELETE FROM snapshots WHERE sandbox_id=? AND created<? AND id<>? AND id<>?",
             id,
             cutoff,
-            str(s, "snapshot_id"));
+            str(s, "snapshot_id"),
+            str(s, "cleanup_snapshot_id"));
         Set<String> refs = new HashSet<>();
         for (var snap : db.all("SELECT manifest FROM snapshots WHERE sandbox_id=?", id))
           for (var e : node(str(snap, "manifest")).path("entries"))

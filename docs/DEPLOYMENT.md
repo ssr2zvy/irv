@@ -42,8 +42,9 @@ The backend serves the built React app, API, terminal WebSockets and preview pro
 
 Choose working storage:
 
-- `IRV_WORKING_STORAGE=ephemeral`: no Fly volume; workspace resides on the Machine disk while it exists, and Tigris is the durable source after deletion.
-- `IRV_WORKING_STORAGE=volume`: create a 10 GiB volume (`IRV_VOLUME_GB` configurable). The optimizer can retain it after destroying the Machine or delete it after a verified snapshot.
+- New Machines always attach a Fly volume, default 10 GiB (`IRV_VOLUME_GB`). The older `IRV_WORKING_STORAGE` selector is no longer read; `volume` in example configuration is informational compatibility only.
+- After five idle minutes, the fixed policy saves the designated folder and flushes agent logs before deleting the Machine and working volume. A failed save or recovery estimate over 180 seconds retains resources. See [active policy](ALGORITHM.md).
+- Rebuild **both agent images and the backend/UI** for this patch. Older agents cannot confirm the required final log flush. Set/promote the new image references, and checkpoint existing work before upgrading an existing Machine image. Legacy retained Machines are not silently discarded; reopen/update them before cleanup. The daily update worker remains deferred.
 
 Both retain only the designated folder as the durable contract. Users run without root/sudo or privileged capabilities. Install system-wide dependencies by changing and rebuilding the predefined images; user-local tools can be set up in entrypoint/helper scripts. This is not a privileged Docker-in-Docker service.
 

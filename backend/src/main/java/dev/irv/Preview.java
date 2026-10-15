@@ -55,7 +55,7 @@ public class Preview extends OncePerRequestFilter {
         s.sendError(503, "Open the sandbox terminal first");
         return;
       }
-      db.exec("UPDATE sandboxes SET lease_until=? WHERE id=?", now() + 45000, box);
+      hub.touch(box);
       Map<String, String> headers = new HashMap<>();
       var names = r.getHeaderNames();
       while (names.hasMoreElements()) {

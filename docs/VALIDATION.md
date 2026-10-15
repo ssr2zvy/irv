@@ -1,36 +1,22 @@
-# Validation record
+# Fixed-policy patch validation
 
-Original distribution validation record, prepared on 2026-10-14 UTC. The results below describe the original local verification; they are not a new test run for the workflow-removal patch.
+Validated locally on 2026-10-15 UTC against source from upstream commit `ae74fbbf4a267b0fc7fe21fccf3adfdd7ca499a7`.
 
-## Executed successfully
+## Executed successfully for this patch
 
-- **14 Java tests**: RFC-compatible TOTP and replay rejection; restricted TOML and path validation; censored observations and return learning; exclusion of recovery plans above 180 seconds; transition cost tradeoffs; complete invite/signup/MFA/session/logout flow; invite reuse rejection; CSRF protections; active-session protection; failed-save and mismatched-snapshot deletion guards; valid stopped-to-cold transition.
-- **5 Python tests**: path traversal and external symlink escape rejection; keyword validation; provider-config rejection; incremental deduplication and exact restore including empty directories/symlinks; failed-upload commit prevention.
-- **2 frontend helper tests**: deadline display and defensive stored-tree parsing.
-- **Real local backend-agent integration** using a simulated Fly API: boot/migrations, frontend serving, invite registration, TOTP enrollment, owner session, sandbox create/start/readiness, PTY shell execution, file writes, chunk snapshot commit, app-to-machine and machine-to-app config synchronization, temporary-host HTTP preview, WebSocket echo using the Vite HMR subprotocol, and persisted logs.
-- React production build, Spring Boot executable JAR build, Python syntax checks.
-- `npm audit`: **0 reported vulnerabilities** after updating Vite to 7.3.7.
-- Fly API contract checker against the captured current upstream OpenAPI baseline.
+- Compiled all production Java source and `FixedPolicyChecks` with Java 17.0.20 against the 90 runtime dependency JARs extracted from the repository's existing application JAR (including Spring Framework 6.2.19).
+- **20 Java lifecycle scenarios**, executed through `FixedPolicyChecks.main`: absolute five-minute scheduling, lease-expiry timing, save/delete ordering, active-use protection, heartbeat cancellation, save failure/retry backoff, snapshot and log-flush acknowledgement guards, return during save, an actual concurrent reopen, post-save workspace growth, failed cold-start retention, partial-deletion recovery after backend restart, legacy stopped-state protection, interrupted-save recovery, mandatory volume creation, request-time startup accounting, idempotent provider deletion, final usage accounting, expired queued startup rejection and pre-queue deadline publication. The JUnit `LifecycleTest` invokes the same checks during a normal Maven build.
+- **8 Python tests**: existing path/config/incremental-snapshot/restore protections plus final config synchronization, final log acknowledgement, log-flush failure retention, and concurrent log uploader safety.
+- **2 frontend helper tests**, plus a Vite 7.3.7 production build using the already installed matching dependency tree. Vite reports existing TOML eval/externalized-stream and large-bundle warnings.
+- **Real local backend + real Python agent**, using a simulated Fly API and local blob storage: application boot and migrations, invite signup/TOTP, PTY and file writing, incremental save, two-way config synchronization, HTTP and WebSocket previews, logs, final checkpoint/log flush, Machine-then-volume deletion, new-volume creation and cold restore of the saved file. This used a temporary locally compiled executable JAR assembled with the repository's bundled runtime dependencies. The simulation disables process signal control so it cannot signal unrelated local processes; real VM process freezing still requires staging validation.
 
-## Not executed here
+## Limits of these results
 
-- Actual Fly Machine provisioning, volume retention/deletion, suspend/resume, region capacity and billing reconciliation.
-- Actual Tigris S3 requests and account-level policies.
-- Twilio SMS delivery/checks.
-- Docker image builds or Trivy image scans (Docker and account credentials were not available in the original execution environment). The original scheduled/deployment workflows were not validated there and have since been removed.
-- A visual browser inspection of the UI. The production bundle and real HTTP/WebSocket paths were exercised, but screenshots/accessibility audits were not performed.
+- A fresh `mvn clean verify` dependency resolution was blocked because the environment's configured Maven network proxy was unavailable. The full JUnit/Surefire suite and a fresh Maven dependency download were **not** run here. Run `bash scripts/build.sh` in your normal build environment; it uses `mvn clean verify` and refreshes the runnable JAR.
+- No live Fly or Tigris resources were provisioned, deleted or billed. No SMS delivery was tested. No Docker images were built or published. Complete a credentialed staging save/delete/restore cycle with the rebuilt images before applying the policy to important working data.
+- No new vulnerability scan or visual browser audit was performed. This patch does not implement the deferred environment maintenance worker or adaptive optimizer.
+- Existing provider-side outages, region capacity, arbitrary startup scripts and provider logs arriving after shutdown are not solved by local tests. The 180-second limit is a planning guard and failure deadline, not a guarantee of successful recovery.
+- One backend replica is required. The migration is additive; old retained Machines are protected rather than silently discarded. Legacy agent images lack the required final log-flush acknowledgement and block deletion until updated.
+- Displayed costs remain configured-rate machine/volume estimates, not complete provider invoices.
 
-The supplied `scripts/live_smoke.py` is available for manual credentialed staging validation. It does not substitute for testing failure recovery under your actual cloud configuration. Live canaries currently verify startup/PTY/write/save; full provider volume/suspend and destructive-recreation exercises must additionally be run before relying on those modes in production.
-
-## Explicit scope limits
-
-- One control-plane replica. Distributed locking/routing is not implemented.
-- Automatic sandbox-image maintenance and Fly API integration updates are deferred and not implemented. Operators can build and validate images and manually select digest-pinned image references; these apply at the next cold Machine creation.
-- The optimizer learns return timing and conservative transition-duration bounds. It does not use an LLM, paid randomized exploration, time-of-day features, or a direct reinforcement-learning policy.
-- Volume retention/deletion is optimized when a volume exists; working medium at creation is an operator setting. Live migration into a newly created volume is not optimized by this release.
-- The 180-second limit is an enforced planning constraint and startup failure deadline, not an infrastructure availability guarantee.
-- UI cost totals are estimated machine/volume costs, not invoice totals; no exact billing API has been assumed.
-- Historical backup selection and invite revocation are exposed through owner/admin APIs. Password/MFA administrator recovery is an operator procedure, not a finished account-recovery UI.
-- HTTP previews are buffered with a 4 MiB limit; SSE/streamed HTTP and arbitrary WebSocket subprotocols are outside this implementation.
-
-Consult the other documents for exact defaults. These limits are stated so the archive is reviewable; the package should not be represented as a fully validated production service merely because its local tests pass.
+The source patch excludes rebuilt binary JARs and generated UI assets. Rebuild from patched source. The packaged application instructions explain upgrade order and preservation of existing work.

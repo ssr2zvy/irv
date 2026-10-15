@@ -20,7 +20,7 @@ by the commented source file.
 `Maintenance.java` remains active for snapshot/chunk retention, expired logs
 and sessions, provider metrics, and container-log collection. These operations
 serve the running app and are separate from the deferred environment updater.
-The lifecycle cost optimizer is also unchanged.
+The lifecycle cost optimizer is separately deferred in `DeferredCostOptimizer.java`. The active five-minute policy is described in `ALGORITHM.md`.
 
 ## Manual environment updates
 
