@@ -6,3 +6,9 @@
 **/data
 .git
 **/__pycache__
+**/*.zip
+**/*.log
+**/*.pem
+**/*.key
+**/*.sqlite*
+**/*.mv.db
