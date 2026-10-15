@@ -1,4 +1,4 @@
-# First private deployment of irv
+# Deployment of irv with a public connectivity page
 
 This configuration targets the existing Fly app `iruvu`. It is a private boot/UI test, not the completed Auth0/Cloudflare deployment or a working sandbox-provisioning configuration.
 
@@ -8,7 +8,7 @@ This configuration targets the existing Fly app `iruvu`. It is a private boot/UI
 
 The volume holds the app's embedded H2 database, local blob files, and private-test bootstrap credentials. This is the control-plane volume, not a sandbox volume. No PostgreSQL `DATABASE_URL`, Tigris credentials, runtime Fly API token, sandbox images, or custom domain is required for this test. Database metadata is still necessary; the first-deploy profile supplies embedded H2 rather than removing persistence.
 
-There is no public HTTP service. The Machine stays running until stopped manually; volume storage remains billable after stopping. This initial deployment does not configure automatic stopping of the app itself.
+The public HTTP service routes only to an isolated listener on port 8081. Its default page says `connected successfully`; other paths return 404 and methods other than GET/HEAD return 405 at `/`. Application routes on port 8080 remain private. The Machine stays running until stopped manually; volume storage remains billable after stopping. Public traffic does not automatically restart a manually stopped Machine.
 
 ## Deploy
 
@@ -18,7 +18,9 @@ There is no public HTTP service. The Machine stays running until stopped manuall
 4. Alternatively, with Fly CLI installed and `FLY_API_TOKEN` securely exported, run `bash ci-cd/deploy.sh deploy` from the checkout.
 5. From a computer authenticated to the Fly app, run `flyctl proxy 8080:8080 -a iruvu`. Open `http://localhost:8080`. Health is available at `http://localhost:8080/api/health`.
 
-Do not add a public service to this configuration to bypass the proxy. The agreed public authentication model has not been implemented by this change. `IRV_SECURE_COOKIES=false` applies only to the local HTTP proxy test.
+After deploying, open https://iruvu.fly.dev/ to see the connectivity page. The agreed public authentication model has not been implemented by this change. `IRV_SECURE_COOKIES=false` still applies only to the private application accessed through the local HTTP proxy; the public page sets no cookies. Never change the public service's internal port to 8080 to bypass this separation.
+
+If the app has no public addresses, inspect `flyctl ips list -a iruvu`. Allocate a shared IPv4 with `flyctl ips allocate-v4 --shared -a iruvu` and a public IPv6 with `flyctl ips allocate-v6 -a iruvu` only for missing address types. Do not allocate a dedicated IPv4 for this page. No custom domain is necessary. See https://fly.io/docs/reference/configuration/ for service configuration.
 
 ## Initial account
 
