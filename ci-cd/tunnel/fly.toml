@@ -1,0 +1,28 @@
+# Create this app in the SAME Fly organization/private network as iruvu.
+app = "iruvu-tunnel"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# TUNNEL_TOKEN is a Fly secret on THIS app only. Never put its value here.
+# No http_service, services, public IP, mounts, or database configuration.
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "256mb"
+
+[[restart]]
+  policy = "always"
+
+[checks.tunnel]
+  type = "http"
+  port = 2000
+  method = "GET"
+  path = "/ready"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "60s"
