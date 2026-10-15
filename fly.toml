@@ -1,25 +1,41 @@
-# Replace the globally unique app name and set IRV_PUBLIC_ORIGIN accordingly.
-app = "replace-with-your-irv-app"
+# Private first deployment. Access with: flyctl proxy 8080:8080 -a iruvu
+app = "iruvu"
 primary_region = "iad"
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "ci-cd/Containerfile"
 [env]
   PORT = "8080"
-  IRV_SECURE_COOKIES = "true"
-  IRV_WORKING_STORAGE = "volume"
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = "off"
-  auto_start_machines = true
-  min_machines_running = 1
+  SPRING_PROFILES_ACTIVE = "first-deploy"
+  IRV_DATA_DIR = "/data"
+  IRV_BLOB_DIR = "/data/blobs"
+  IRV_PUBLIC_ORIGIN = "http://localhost:8080"
+  IRV_PREVIEW_ORIGIN = "http://localhost:8080"
+  # HTTP only on the operator's local Fly proxy; no public HTTP service exists.
+  IRV_SECURE_COOKIES = "false"
+  IRV_FLY_LOGS = "false"
+
+# External services are not required for this private boot/UI test.
+# DATABASE_URL / DATABASE_USER / DATABASE_PASSWORD: later PostgreSQL setup.
+# S3_BUCKET / S3_ENDPOINT / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY: later Tigris setup.
+# FLY_API_TOKEN / FLY_ORG / IRV_BLANK_IMAGE / IRV_JAVA_IMAGE: later sandbox provisioning.
+# The deployment token belongs in GitHub Actions/Codespaces, not runtime secrets.
+
+[[mounts]]
+  source = "iruvu_data"
+  destination = "/data"
+  initial_size = "1gb"
+
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
   memory = "1024mb"
-[[http_service.checks]]
+
+# Standalone health check; it does not publish a service to the Internet.
+[checks.boot]
+  type = "http"
+  port = 8080
   interval = "30s"
   timeout = "5s"
-  grace_period = "20s"
+  grace_period = "60s"
   method = "GET"
   path = "/api/health"
