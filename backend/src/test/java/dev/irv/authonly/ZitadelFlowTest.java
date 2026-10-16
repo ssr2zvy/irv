@@ -147,6 +147,47 @@ class ZitadelFlowTest {
     return session;
   }
 
+  // Exercise the real security chain without the separate auth-only feature boundary.
+  // No production matcher names this controller's routes.
+  @org.springframework.web.bind.annotation.RestController
+  static class FutureEndpoint {
+    @org.springframework.web.bind.annotation.RequestMapping("/future/operation")
+    String operation() { return "reached"; }
+  }
+
+  @Test void unnamedFutureEndpointRequiresBoundSessionByDefault() throws Exception {
+    MockMvc future = org.springframework.test.web.servlet.setup.MockMvcBuilders
+        .standaloneSetup(new FutureEndpoint())
+        .addFilters(context.getBean(org.springframework.security.web.FilterChainProxy.class)).build();
+    assertEquals(401, future.perform(req(get("/future/operation"))).andReturn().getResponse().getStatus());
+    MockHttpSession valid = login();
+    assertEquals(200, future.perform(req(get("/future/operation")).session(valid)).andReturn().getResponse().getStatus());
+    // The unchanged runtime boundary must still reject it, even after a successful login.
+    assertEquals(404, mvc.perform(req(get("/future/operation")).session(valid)).andReturn().getResponse().getStatus());
+    assertEquals(403, future.perform(req(post("/future/operation")).session(valid)).andReturn().getResponse().getStatus());
+    MvcResult csrf = mvc.perform(req(get("/auth/csrf")).session(valid)).andReturn();
+    String token = mapper.readTree(csrf.getResponse().getContentAsString()).get("token").asText();
+    assertEquals(200, future.perform(req(post("/future/operation")).session(valid).header("X-CSRF-TOKEN", token)).andReturn().getResponse().getStatus());
+    assertEquals(403, future.perform(req(post("/future/operation")).session(valid).header("X-CSRF-TOKEN", token)
+        .with(r -> { r.removeHeader("Origin"); return r; })).andReturn().getResponse().getStatus());
+    assertEquals(403, future.perform(req(get("/future/operation")).session(valid)
+        .with(r -> { r.removeHeader("X-Irv-Cert-SHA256"); r.addHeader("X-Irv-Cert-SHA256", OTHER); return r; })).andReturn().getResponse().getStatus());
+    assertTrue(valid.isInvalid());
+    for (String fault : List.of("idle", "absolute", "missing-binding", "subject", "ingress", "revoked")) {
+      MockHttpSession session = login();
+      var b = (BoundSessions.Bound) session.getAttribute(BoundSessions.KEY);
+      if (fault.equals("missing-binding")) session.removeAttribute(BoundSessions.KEY);
+      if (fault.equals("idle")) session.setAttribute(BoundSessions.KEY, new BoundSessions.Bound(b.subject(), FP, b.created(), Instant.now().minusSeconds(301)));
+      if (fault.equals("absolute")) session.setAttribute(BoundSessions.KEY, new BoundSessions.Bound(b.subject(), FP, Instant.now().minusSeconds(28801), b.activity()));
+      if (fault.equals("subject")) session.setAttribute(BoundSessions.KEY, new BoundSessions.Bound("456", FP, b.created(), b.activity()));
+      assertEquals(403, future.perform(req(get("/future/operation")).session(session).with(r -> {
+        if (fault.equals("ingress")) r.removeHeader("X-Irv-Ingress-Key");
+        if (fault.equals("revoked")) { r.removeHeader("X-Irv-Cert-Revoked"); r.addHeader("X-Irv-Cert-Revoked", "true"); }
+        return r;
+      })).andReturn().getResponse().getStatus(), fault);
+    }
+  }
+
   @Test void validLoginProtectsBackendAndNeverDisplaysTokens() throws Exception {
     MockHttpSession session = login();
     assertEquals(200, mvc.perform(req(get("/auth/protected")).session(session)).andReturn().getResponse().getStatus());

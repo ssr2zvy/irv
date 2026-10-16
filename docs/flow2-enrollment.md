@@ -88,3 +88,8 @@ Still required on the deployed iPhone: invite -> username signup -> hosted passk
 - Reviewed provider source: https://github.com/zitadel/zitadel/tree/78cd78ace5f047133b21ffec31a3c21f005616e9 — apps/login/src/app/(login)/passkey/set/page.tsx, apps/login/src/components/register-passkey.tsx, proto/zitadel/user/v2/user_service.proto, cmd/defaults.yaml.
 
 No payment, plan upgrade, trial activation, custom-domain purchase or billing endpoint is called. Signup now DOES use administrative APIs (three calls for a successful signup), unlike the earlier login-only patch. Existing ZITADEL account/DAU/API limits and Fly/domain costs still apply. No new hosted database or machine is introduced; the existing volume stores a small ledger. This is not a guarantee about the current subscription settings on your provider account.
+
+## Operator runbooks
+
+See [manual account and invite management](manual-auth-operations.md) and
+[default endpoint authentication](default-authentication.md).
