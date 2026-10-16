@@ -71,9 +71,11 @@ public class ZitadelSecurity {
         .csrf(c -> c.csrfTokenRepository(new HttpSessionCsrfTokenRepository()))
         .sessionManagement(c -> c.sessionFixation(f -> f.changeSessionId()))
         .authorizeHttpRequests(c -> c
-            .requestMatchers("/auth/signup", "/auth/signup/resume", "/auth/csrf", "/oauth2/authorization/zitadel", "/login/oauth2/code/zitadel").permitAll()
-            .requestMatchers("/auth/protected", "/auth/activity", "/auth/logout").authenticated()
-            .anyRequest().denyAll())
+            .requestMatchers(org.springframework.http.HttpMethod.GET, "/auth/csrf", "/login/oauth2/code/zitadel").permitAll()
+            .requestMatchers(org.springframework.http.HttpMethod.POST, "/auth/signup", "/auth/signup/resume", "/oauth2/authorization/zitadel").permitAll()
+            // No protected-path list: every new route inherits the same session binding checks.
+            // AuthOnlyConfiguration independently keeps unfinished routes unreachable.
+            .anyRequest().access(new BoundSessionAuthorization(sessions)))
         .exceptionHandling(c -> c.authenticationEntryPoint((req, res, ex) -> res.setStatus(401))
             .accessDeniedHandler((req, res, ex) -> res.setStatus(403)))
         .logout(c -> c.disable())
