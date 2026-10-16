@@ -1,12 +1,12 @@
 'use strict';
-const labels = {passed: 'Passed', failed: 'Failed', pending: 'Pending', not_configured: 'Not configured'};
+const labels = {passed: 'Passed', failed: 'Failed', pending: 'Pending', not_configured: 'Not configured', not_required: 'Not required'};
 const messages = {
   login_validation_failed: 'Login transaction or token validation failed. Start a new login.',
   passkey_evidence_missing: 'The signed token did not provide usable passkey evidence.',
   passkey_evidence_rejected: 'Authentication was not accepted as passkey-only. Password/OTP or unknown methods are rejected.',
   fresh_authentication_required: 'Fresh authentication was not proven. Start a new passkey login.',
   required_role_missing: 'The required irv user role was not present.',
-  certificate_account_mismatch: 'This account and certificate are not an approved pair.',
+  certificate_required: 'Certificate admission failed.',
   login_transaction_missing: 'The certificate-bound login transaction was missing.',
   invalid_subject: 'The provider returned an invalid account identifier.'
 };
@@ -37,6 +37,7 @@ async function refresh() {
     const data = await response.json();
     if (!Array.isArray(data.checks) || typeof data.authenticated !== 'boolean') throw new Error('Invalid report');
     authenticated = data.authenticated;
+    document.getElementById("signup-section").hidden = authenticated || !data.signupEnabled;
     const list = document.getElementById('checks'); list.replaceChildren();
     for (const check of data.checks) {
       const item = document.createElement('li');
@@ -81,7 +82,7 @@ document.getElementById('logout').addEventListener('click', async () => {
 document.getElementById('probe').addEventListener('click', async () => {
   try {
     const r = await fetch('/auth/protected', {cache: 'no-store', credentials: 'same-origin'});
-    message.textContent = r.ok ? 'Protected backend request passed session and certificate checks.' : 'Protected backend request denied.';
+    message.textContent = r.ok ? 'Protected backend request passed the configured authentication checks.' : 'Protected backend request denied.';
   } catch (_) { message.textContent = 'Backend unavailable.'; }
 });
 // Only deliberate foreground input sends activity; background polling/visibility/refresh never do.
@@ -97,3 +98,31 @@ document.getElementById('refresh').addEventListener('click', refresh);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 refresh();
 setInterval(() => { if (!document.hidden) refresh(); }, 15000);
+
+let enrolling = false;
+function showEnrollment(data) {
+  const url = new URL(data.enrollmentUrl);
+  if (url.origin !== 'https://irv-instance-4ftbgu.us1.zitadel.cloud' || url.pathname !== '/ui/v2/login/passkey/set') throw new Error('Unexpected enrollment response.');
+  const link = document.getElementById('enrollment-link'); link.href = url.href; link.hidden = false;
+  document.getElementById('enrollment-message').textContent = 'Account created. Open passkey setup below; then return here to sign in. Do not share the setup link.';
+}
+document.getElementById('signup-form').addEventListener('submit', async event => {
+  event.preventDefault(); if (enrolling) return;
+  enrolling = true; document.getElementById('signup').disabled = true;
+  const status = document.getElementById('enrollment-message'); status.textContent = 'Creating your account…';
+  try {
+    const token = await csrf();
+    const r = await fetch('/auth/signup', {method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: {[token.headerName]: token.token}, body: new URLSearchParams(new FormData(event.target))});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Registration failed.');
+    event.target.reset(); showEnrollment(data);
+  } catch (e) { status.textContent = e.message || 'Registration could not be confirmed. Try Resume passkey setup before submitting another invite.'; }
+  finally { enrolling = false; document.getElementById('signup').disabled = false; }
+});
+document.getElementById('resume-enrollment').addEventListener('click', async () => {
+  try {
+    const r = await post('/auth/signup/resume'); const data = await r.json();
+    if (!r.ok) throw new Error(data.error || 'Cannot resume enrollment.'); showEnrollment(data);
+  } catch (e) { document.getElementById('enrollment-message').textContent = e.message; }
+});

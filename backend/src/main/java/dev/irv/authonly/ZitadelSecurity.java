@@ -26,6 +26,11 @@ import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 @Profile("auth-only")
 public class ZitadelSecurity {
   @Bean AuthSettings authSettings(Environment env, ObjectMapper mapper) { return new AuthSettings(env, mapper); }
+  @Bean(destroyMethod = "close") InviteLedger inviteLedger(AuthSettings settings) { return new InviteLedger(settings); }
+  @Bean EnrollmentProvider enrollmentProvider(AuthSettings settings, ObjectMapper mapper) { return new EnrollmentProvider(settings, mapper); }
+  @Bean Enrollment enrollment(AuthSettings settings, CertificateGate gate, InviteLedger ledger, EnrollmentProvider provider, Clock clock) {
+    return new Enrollment(settings, gate, ledger, provider, clock);
+  }
   @Bean Clock authClock() { return Clock.systemUTC(); }
   @Bean CertificateGate certificateGate(AuthSettings settings) { return new CertificateGate(settings); }
   @Bean BoundSessions boundSessions(AuthSettings settings, CertificateGate gate, Clock clock) { return new BoundSessions(settings, gate, clock); }
@@ -66,7 +71,7 @@ public class ZitadelSecurity {
         .csrf(c -> c.csrfTokenRepository(new HttpSessionCsrfTokenRepository()))
         .sessionManagement(c -> c.sessionFixation(f -> f.changeSessionId()))
         .authorizeHttpRequests(c -> c
-            .requestMatchers("/auth/csrf", "/oauth2/authorization/zitadel", "/login/oauth2/code/zitadel").permitAll()
+            .requestMatchers("/auth/signup", "/auth/signup/resume", "/auth/csrf", "/oauth2/authorization/zitadel", "/login/oauth2/code/zitadel").permitAll()
             .requestMatchers("/auth/protected", "/auth/activity", "/auth/logout").authenticated()
             .anyRequest().denyAll())
         .exceptionHandling(c -> c.authenticationEntryPoint((req, res, ex) -> res.setStatus(401))

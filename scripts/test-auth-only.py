@@ -15,7 +15,7 @@ def request(port, path, headers=None, method='GET'):
 for configured in [False, True]:
     env = {k:v for k,v in os.environ.items() if not k.startswith(('IRV_', 'SPRING_', 'DATABASE_', 'S3_', 'AWS_', 'FLY_'))}
     env.update(SPRING_PROFILES_ACTIVE='auth-only', IRV_TUNNEL_ENABLED='false')
-    if configured: env.update(IRV_AUTH_INGRESS_SECRET=secret, IRV_AUTH_ADMISSIONS_JSON=json.dumps({'123': [fp]}))
+    if configured: env.update(IRV_AUTH_INGRESS_SECRET=secret)
     with tempfile.TemporaryDirectory() as work:
       with open(pathlib.Path(work)/'run.log', 'w+') as log:
         process = subprocess.Popen(base, env=env, cwd=work, stdout=log, stderr=log)

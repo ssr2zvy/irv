@@ -14,12 +14,16 @@ final class CertificateGate {
     return values.size() == 1 ? values.get(0) : "";
   }
 
-  String verified(HttpServletRequest request) {
+  boolean trusted(HttpServletRequest request) {
     if (settings.ingressSecret.isEmpty() || request.getLocalPort() != 8081
-        || !Set.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(request.getRemoteAddr())) return null;
+        || !Set.of("127.0.0.1", "::1", "0:0:0:0:0:0:0:1").contains(request.getRemoteAddr())) return false;
     String supplied = header(request, "X-Irv-Ingress-Key");
-    if (supplied.length() != 64 || !MessageDigest.isEqual(
-        settings.ingressSecret.getBytes(StandardCharsets.US_ASCII), supplied.getBytes(StandardCharsets.US_ASCII))) return null;
+    return supplied.length() == 64 && MessageDigest.isEqual(
+        settings.ingressSecret.getBytes(StandardCharsets.US_ASCII), supplied.getBytes(StandardCharsets.US_ASCII));
+  }
+
+  String verified(HttpServletRequest request) {
+    if (!trusted(request)) return null;
     String fp = header(request, "X-Irv-Cert-SHA256").toLowerCase(Locale.ROOT);
     if (!"true".equals(header(request, "X-Irv-Cert-Verified"))
         || !"false".equals(header(request, "X-Irv-Cert-Revoked"))
@@ -28,7 +32,6 @@ final class CertificateGate {
   }
 
   String approved(HttpServletRequest request) {
-    String fp = verified(request);
-    return fp != null && settings.certificates.contains(fp) ? fp : null;
+    return settings.certificateRequired ? verified(request) : trusted(request) ? "" : null;
   }
 }

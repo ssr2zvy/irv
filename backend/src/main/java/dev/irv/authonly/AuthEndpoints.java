@@ -11,7 +11,8 @@ import org.springframework.web.bind.annotation.*;
 @Profile("auth-only")
 public class AuthEndpoints {
   private final BoundSessions sessions;
-  AuthEndpoints(BoundSessions sessions) { this.sessions = sessions; }
+  private final AuthSettings settings;
+  AuthEndpoints(BoundSessions sessions, AuthSettings settings) { this.sessions = sessions; this.settings = settings; }
 
   @GetMapping("/auth/csrf")
   Map<String, String> csrf(CsrfToken token) {
@@ -19,7 +20,7 @@ public class AuthEndpoints {
   }
   @GetMapping("/auth/protected")
   Map<String, Object> protectedProbe() {
-    return Map.of("authenticated", true, "certificateBound", true, "sandboxAccessEnabled", false);
+    return Map.of("authenticated", true, "certificateBound", settings.certificateRequired, "sandboxAccessEnabled", false);
   }
   @PostMapping("/auth/activity")
   void activity(HttpServletRequest request, HttpServletResponse response) {
