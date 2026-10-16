@@ -36,8 +36,8 @@ final class Enrollment {
       throw error(HttpStatus.CONFLICT, "Sign out before creating another account.");
     rate();
     if (invite == null || !invite.matches("[A-Za-z0-9_-]{43,128}") || username == null
-        || !username.matches("[a-z0-9][a-z0-9_.-]{2,31}") || email == null || email.length() > 200
-        || !email.matches("[^\\s@]+@[^\\s@]+\\.[^\\s@]+") || !name(given) || !name(family))
+        || !username.matches("[a-z0-9][a-z0-9_.-]{2,31}") || !email(email)
+        || !name(given) || !name(family))
       throw error(HttpStatus.BAD_REQUEST, "Check the invite, username, email and name fields.");
     String hash = hash(invite);
     if (!clock.instant().isBefore(settings.invites.getOrDefault(hash, Instant.EPOCH)))
@@ -68,6 +68,11 @@ final class Enrollment {
         && pending.fingerprint().equals(gate.approved(request)) && clock.instant().isBefore(pending.expires()))
       return pending.url();
     throw error(HttpStatus.NOT_FOUND, "No resumable enrollment in this browser session.");
+  }
+  private static boolean email(String value) {
+    if (value == null || value.length() > 200 || value.chars().anyMatch(Character::isWhitespace)) return false;
+    int at = value.indexOf('@');
+    return at > 0 && at == value.lastIndexOf('@') && value.indexOf('.', at + 2) > at + 1 && value.charAt(value.length() - 1) != '.';
   }
   private static boolean name(String value) { return value != null && !value.isBlank() && value.length() <= 100 && value.chars().noneMatch(Character::isISOControl); }
   static String hash(String code) {
