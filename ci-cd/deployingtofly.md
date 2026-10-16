@@ -53,7 +53,7 @@ For local Docker use, IRV_TUNNEL_ENABLED defaults to false and preserves Java-on
 
 Separate users, file permissions, and environment separation reduce cross-process exposure. They are not separate-kernel isolation: root/kernel or Fly administration compromise can affect both. Supervisor and initialization are trusted root components.
 
-This patch does not implement Cloudflare mTLS enforcement, trusted certificate forwarding, Auth0 passkeys/invites, or certificate-bound sessions. The temporary page is intentionally accessible without login after routing works. The real UI/API is excluded from that route.
+The auth-only runtime now implements ZITADEL login and certificate-bound diagnostic sessions. Cloudflare enforcement/forwarding and operator admission must be configured; automated invites remain separate. Follow `docs/zitadel-login.md`. The real sandbox UI/API remains excluded from this profile.
 
 ## Inspect
 

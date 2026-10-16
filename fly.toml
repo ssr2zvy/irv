@@ -18,9 +18,9 @@ kill_timeout = "60s"
   IRV_PUBLIC_STATUS_ENABLED = "false"
   IRV_TUNNEL_ENABLED = "true"
 
-# Auth-only preparation: no database, Tigris, provisioning, or Auth0 required to boot.
-# Optional certificate diagnostics: IRV_AUTH_INGRESS_SECRET and
-# IRV_AUTH_ALLOWED_CERT_SHA256; see docs/auth-only-testing.md.
+# Auth-only ZITADEL login: no database, Tigris or sandbox provisioning.
+# Required for login: IRV_AUTH_INGRESS_SECRET and IRV_AUTH_ADMISSIONS_JSON.
+# See docs/zitadel-login.md. Missing admissions deny access; no default test user.
 # DATABASE_URL / DATABASE_USER / DATABASE_PASSWORD: later PostgreSQL setup.
 # S3_BUCKET / S3_ENDPOINT / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY: later Tigris setup.
 # FLY_API_TOKEN / FLY_ORG / IRV_BLANK_IMAGE / IRV_JAVA_IMAGE: later sandbox provisioning.

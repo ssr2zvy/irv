@@ -7,9 +7,9 @@ import org.springframework.boot.WebApplicationType;
 public final class AuthOnlyIsolationChecks {
   public static void main(String[] args) {
     SpringApplication app = new SpringApplication(App.class);
-    app.setWebApplicationType(WebApplicationType.NONE);
+    app.setWebApplicationType(WebApplicationType.SERVLET);
     try (var context =
-        app.run("--spring.profiles.active=auth-only", "--spring.main.banner-mode=off")) {
+        app.run("--spring.profiles.active=auth-only", "--spring.main.banner-mode=off", "--server.port=0")) {
       for (Class<?> type :
           new Class<?>[] {
             AgentApi.class,
