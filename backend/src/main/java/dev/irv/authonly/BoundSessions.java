@@ -10,11 +10,10 @@ final class BoundSessions {
   static final String KEY = BoundSessions.class.getName();
   static final Duration IDLE = Duration.ofMinutes(5), ABSOLUTE = Duration.ofHours(8);
   record Bound(String subject, String fingerprint, Instant created, Instant activity) {}
-  private final AuthSettings settings;
   private final CertificateGate gate;
   private final Clock clock;
   BoundSessions(AuthSettings settings, CertificateGate gate, Clock clock) {
-    this.settings = settings; this.gate = gate; this.clock = clock;
+    this.gate = gate; this.clock = clock;
   }
   Bound current(HttpServletRequest request) {
     HttpSession session = request.getSession(false);
@@ -24,7 +23,6 @@ final class BoundSessions {
       if (!(value instanceof Bound bound)) return null;
       Instant now = clock.instant();
       if (bound.fingerprint().equals(gate.approved(request))
-          && settings.admits(bound.subject(), bound.fingerprint())
           && now.isBefore(bound.created().plus(ABSOLUTE))
           && now.isBefore(bound.activity().plus(IDLE))) return bound;
       session.invalidate();
@@ -33,7 +31,7 @@ final class BoundSessions {
   }
   void create(HttpServletRequest request, String subject) {
     String fp = gate.approved(request);
-    if (fp == null || !settings.admits(subject, fp)) throw LoginPolicy.failure("certificate_account_mismatch");
+    if (fp == null) throw LoginPolicy.failure("certificate_required");
     HttpSession session = request.getSession(true);
     session.setMaxInactiveInterval((int) ABSOLUTE.toSeconds());
     Instant now = clock.instant();

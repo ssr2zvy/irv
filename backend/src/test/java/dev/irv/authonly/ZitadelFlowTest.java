@@ -28,14 +28,19 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 
 @SpringBootTest(properties = {
     "IRV_AUTH_INGRESS_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "IRV_AUTH_ADMISSIONS_JSON={\"123\":[\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"],\"456\":[\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"]}",
-    "IRV_TUNNEL_ENABLED=false"})
+    "IRV_TUNNEL_ENABLED=false", "IRV_AUTH_ENROLLMENT_ENABLED=true", "IRV_ZITADEL_ENROLLMENT_TOKEN=test-token"})
 @AutoConfigureMockMvc
 @ActiveProfiles("auth-only")
 @Import(ZitadelFlowTest.ProviderConfig.class)
 class ZitadelFlowTest {
   static final String SECRET = "a".repeat(64), FP = "b".repeat(64), OTHER = "c".repeat(64);
   static final ObjectMapper JSON = new ObjectMapper();
+  @org.springframework.test.context.DynamicPropertySource
+  static void registrationProperties(org.springframework.test.context.DynamicPropertyRegistry r) throws Exception {
+    String db = java.nio.file.Files.createTempDirectory("irv-signup-test-").resolve("auth/invites").toString();
+    r.add("IRV_AUTH_INVITE_DB", () -> db);
+    r.add("IRV_AUTH_INVITES_JSON", () -> "{\"" + Enrollment.hash("i".repeat(43)) + "\":\"2099-01-01T00:00:00Z\"}");
+  }
   static final RSAKey KEY;
   static final HttpServer PROVIDER;
   static volatile String nonce, challenge, mode = "valid";
@@ -60,7 +65,7 @@ class ZitadelFlowTest {
           if (!pkceVerified) throw new IllegalStateException("PKCE failed");
           Instant now = Instant.now();
           var claims = new JWTClaimsSet.Builder().issuer(mode.equals("issuer") ? "https://wrong.invalid" : AuthSettings.ISSUER)
-              .subject(mode.equals("subject") ? "999" : "123")
+              .subject(mode.equals("subject") ? "invalid" : mode.equals("another") ? "456" : "123")
               .audience(mode.equals("audience") ? "wrong-client" : AuthSettings.CLIENT)
               .issueTime(Date.from(now)).expirationTime(Date.from(mode.equals("expired") ? now.minusSeconds(120) : now.plusSeconds(300)))
               .claim("nonce", mode.equals("nonce") ? "wrong-nonce" : nonce)
@@ -81,6 +86,9 @@ class ZitadelFlowTest {
 
   @TestConfiguration
   static class ProviderConfig {
+    @Bean @Primary EnrollmentProvider fakeEnrollment(AuthSettings settings) {
+      return new EnrollmentTest.Provider(settings);
+    }
     @Bean @Primary ClientRegistrationRepository testClients() {
       String base = "http://127.0.0.1:" + PROVIDER.getAddress().getPort();
       return new InMemoryClientRegistrationRepository(ClientRegistration.withRegistrationId("zitadel")
@@ -145,6 +153,33 @@ class ZitadelFlowTest {
     String report = mvc.perform(req(get("/auth/status")).session(session)).andReturn().getResponse().getContentAsString();
     assertTrue(mapper.readTree(report).get("authenticated").asBoolean());
     for (String secret : List.of(FP, SECRET, "test-access-token", "id_token", "test-code")) assertFalse(report.contains(secret));
+  }
+  @Test void sameCertificateCanStartSessionsForDifferentAccounts() throws Exception {
+    MockHttpSession first = login();
+    mode = "another";
+    MockHttpSession second = login();
+    assertEquals("123", ((BoundSessions.Bound) first.getAttribute(BoundSessions.KEY)).subject());
+    assertEquals("456", ((BoundSessions.Bound) second.getAttribute(BoundSessions.KEY)).subject());
+    assertEquals(200, mvc.perform(req(get("/auth/protected")).session(second)).andReturn().getResponse().getStatus());
+  }
+  @Test void signupRequiresCsrfAndTrustedOrigin() throws Exception {
+    assertEquals(403, mvc.perform(req(post("/auth/signup")).contentType("application/x-www-form-urlencoded")).andReturn().getResponse().getStatus());
+    assertEquals(405, mvc.perform(req(get("/auth/signup"))).andReturn().getResponse().getStatus());
+    assertEquals(404, mvc.perform(req(post("/auth/signup")).with(r -> { r.setLocalPort(8080); return r; })).andReturn().getResponse().getStatus());
+  }
+  @Test void signupEndpointProvisionsAndKeepsUserUnauthenticatedUntilLogin() throws Exception {
+    MvcResult c = mvc.perform(req(get("/auth/csrf"))).andReturn();
+    MockHttpSession session = (MockHttpSession) c.getRequest().getSession(false);
+    String token = mapper.readTree(c.getResponse().getContentAsString()).get("token").asText();
+    MvcResult created = mvc.perform(req(post("/auth/signup")).session(session).header("X-CSRF-TOKEN", token)
+        .contentType("application/x-www-form-urlencoded").param("invite", "i".repeat(43))
+        .param("username", "newuser").param("email", "new@example.com").param("givenName", "New").param("familyName", "User")).andReturn();
+    assertEquals(200, created.getResponse().getStatus());
+    assertTrue(mapper.readTree(created.getResponse().getContentAsString()).get("enrollmentUrl").asText().startsWith(AuthSettings.ISSUER));
+    assertEquals(401, mvc.perform(req(get("/auth/protected")).session(session)).andReturn().getResponse().getStatus());
+    assertEquals(200, mvc.perform(req(post("/auth/signup/resume")).session(session).header("X-CSRF-TOKEN", token)).andReturn().getResponse().getStatus());
+    assertEquals(403, mvc.perform(req(post("/auth/signup/resume")).session(session).header("X-CSRF-TOKEN", token)
+        .with(r -> { r.removeHeader("Origin"); r.addHeader("Origin", "https://wrong.invalid"); return r; })).andReturn().getResponse().getStatus());
   }
   @Test void rejectsBadClaimsAndSignature() throws Exception {
     for (String invalid : List.of("password", "u2f", "stale", "role", "subject", "issuer", "audience", "expired", "nonce", "signature")) {

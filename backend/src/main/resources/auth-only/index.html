@@ -4,12 +4,26 @@
 <section aria-labelledby="overall"><h2 id="overall">Checking connection…</h2><p id="freshness" role="status">Waiting for the backend.</p><p id="message" role="alert"></p>
 <button id="login" type="button">Sign in with a passkey</button> <button id="logout" type="button" hidden>Sign out</button> <button id="refresh" type="button">Refresh checks</button> <button id="probe" type="button" hidden>Test protected backend request</button>
 <p id="expiry"></p><form id="login-form" method="post" action="/oauth2/authorization/zitadel" hidden></form>
+</section>
+<section id="signup-section" hidden><h2>Create an account</h2>
+<p>Use your invite, choose a username, then enroll a passkey with ZITADEL. Email is a separate contact field, not your account identifier or proof of mailbox ownership.</p>
+<form id="signup-form">
+<label>Invite code <input name="invite" required minlength="43" maxlength="128" autocomplete="off"></label>
+<label>Username <input name="username" required minlength="3" maxlength="32" pattern="[a-z0-9][a-z0-9_.-]{2,31}" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+<label>Email <input name="email" type="email" required maxlength="200" autocomplete="email"></label>
+<label>Given name <input name="givenName" required maxlength="100" autocomplete="given-name"></label>
+<label>Family name <input name="familyName" required maxlength="100" autocomplete="family-name"></label>
+<button id="signup" type="submit">Create account</button>
+</form>
+<p id="enrollment-message" role="status"></p><a id="enrollment-link" hidden target="_blank" rel="noopener noreferrer">Set up your passkey in ZITADEL</a>
+<p>After saving your passkey, return to this tab and select Sign in. Your irv session starts only after a verified login.</p>
+<button id="resume-enrollment" type="button">Resume passkey setup</button>
 </section><section aria-labelledby="checks-title"><h2 id="checks-title">Live checks</h2><ol id="checks"></ol><noscript>JavaScript is required for this diagnostic interface. No authentication result is assumed.</noscript></section>
 <section><h2>Separate verification still required</h2><ul>
 <li>Test direct-origin isolation, forged headers, revoked/expired certificates and copied cookies.</li>
 <li>Test Safari passkey enrollment and fresh authentication, session expiry, CSRF, logout and repeat login. Provider account recovery must not bypass admission or certificate binding.</li>
-<li>Automated invites and account enrollment are not implemented in this patch. Testing requires an explicitly admitted account and its approved certificate.</li>
+<li>Invites are expiring and single use. Registration creates a new account only; no account recovery or existing-user passkey replacement route is provided.</li>
 <li>APIs, terminals, logs, previews and sandbox management remain disabled. Their ownership checks and WebSocket revocation are separate integration work.</li>
-<li>Provider role removal alone is not immediate local-session revocation. Remove operator admission and restart irv to revoke current sessions; every restart/deploy signs everyone out.</li>
+<li>Provider role removal alone is not immediate local-session revocation. Remove the provider role and restart irv to revoke current sessions; every restart/deploy signs everyone out.</li>
 <li>Operator accounts, deployment permissions and device security are separate controls. This page does not establish AAL3 compliance.</li>
-</ul></section><footer>No JWTs, authorization codes, user IDs, private keys or certificate fingerprints are displayed. The browser uses an opaque cookie; the backend checks its certificate binding.</footer></main></body></html>
+</ul></section><footer>No JWTs, authorization codes, user IDs, private keys or certificate fingerprints are displayed. The browser uses an opaque cookie; the backend enforces the configured session and certificate policy.</footer></main></body></html>

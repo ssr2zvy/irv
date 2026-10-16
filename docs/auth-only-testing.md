@@ -1,7 +1,7 @@
 # Auth-only testing
 
-The preparation-only Auth0/password-AND-passkey page has been replaced by the ZITADEL passkey login and certificate-bound session implementation.
+The auth-only profile runs ZITADEL passkey login, invite-gated signup and temporary certificate-bound sessions (Flow 2). See [Flow 2 enrollment](flow2-enrollment.md) for current behavior and [trusted forwarding](zitadel-login.md) for Cloudflare headers.
 
-Use [ZITADEL login and testing instructions](zitadel-login.md) for current settings, trusted headers, admission format, session behavior, test commands and remaining live acceptance checks.
+Legacy authentication, sandbox provisioning, workers, Tigris, terminals/logs/previews and the old SPA remain excluded. The legacy database and migrations stay disabled; enrollment explicitly opens a separate small H2 invite ledger on the existing /data volume when enabled. No permanent certificate/account registry is stored.
 
-The `auth-only` profile still disables legacy authentication, sandbox provisioning, workers, database, Tigris, terminal/log/preview endpoints and the old SPA. `/api/health` remains internal on port 8080; the diagnostic/login listener is loopback port 8081. Missing authentication configuration denies login.
+/api/health remains internal on port 8080; diagnostics and selected authentication routes use loopback port 8081. Signup defaults disabled until its token and invite settings are supplied. Certificate admission defaults required. Every deployment invalidates in-memory login transactions and sessions, while consumed invitations persist on the volume.
