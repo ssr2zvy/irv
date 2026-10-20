@@ -46,6 +46,47 @@ class EnrollmentTest {
   }
   String signup(Enrollment e, MockHttpServletRequest r) { return e.begin(r, CODE, "surya", "contact@example.com", "Given", "Family"); }
 
+  @Test void auditRecordsEachProviderFailureAndNoEnrollmentCredentials() throws Exception {
+    for (String stage : List.of("user_create", "enrollment_link", "role_grant")) {
+      var configuration = env().withProperty("IRV_AUTH_INVITE_DB", temp.resolve(stage + "/invites").toString());
+      AuthSettings settings = new AuthSettings(configuration, JSON);
+      Provider provider = new Provider(settings) {
+        @Override protected JsonNode call(String path, Object body) {
+          if ((stage.equals("user_create") && path.endsWith("/new"))
+              || (stage.equals("enrollment_link") && path.endsWith("registration_link"))
+              || (stage.equals("role_grant") && path.endsWith("/grants")))
+            throw new IllegalStateException("provider-exception-secret");
+          return super.call(path, body);
+        }
+      };
+      try (InviteLedger ledger = new InviteLedger(settings); AuditCapture logs = new AuditCapture()) {
+        Enrollment e = service(settings, ledger, provider);
+        var req = request(); req.setMethod("POST"); req.setRequestURI("/auth/signup");
+        var response = new MockHttpServletResponse();
+        new AuthAuditConfiguration.AuditFilter().doFilter(req, response, (r, res) -> {
+          var error = assertThrows(ResponseStatusException.class, () -> signup(e, req));
+          response.setStatus(error.getStatusCode().value());
+        });
+        assertEquals(502, response.getStatus());
+        logs.has(stage, "failed", "provider_or_response_failure");
+        logs.has("signup", "failed", "review_required");
+        logs.excludes(CODE, SECRET, FP, "contact@example.com", "surya", "secret+value", "secret%2Bvalue", "provider-exception-secret");
+      }
+    }
+  }
+
+  @Test void auditDistinguishesRemovedCertificatePolicyFromFailedCertificate() throws Exception {
+    AuthSettings settings = new AuthSettings(env().withProperty("IRV_AUTH_CERT_REQUIRED", "false"), JSON);
+    try (AuditCapture logs = new AuditCapture()) {
+      var req = request(); req.setMethod("GET"); req.setRequestURI("/auth/csrf");
+      new AuthAuditConfiguration.AuditFilter().doFilter(req, new MockHttpServletResponse(), (r,s) -> {
+        assertEquals("", new CertificateGate(settings).approved(req));
+      });
+      logs.has("certificate", "not_required", "policy_disabled");
+      assertFalse(logs.rows().stream().anyMatch(r -> r.path("event").asText().equals("certificate") && r.path("outcome").asText().equals("passed")));
+    }
+  }
+
   @Test void provisionsPasswordlessAccountAndRoleThenResumesOnlySameSessionCertificate() throws Exception {
     AuthSettings s = new AuthSettings(env(), JSON); Provider p = new Provider(s);
     try (InviteLedger ledger = new InviteLedger(s)) {

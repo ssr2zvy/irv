@@ -15,6 +15,7 @@ def request(port, path, headers=None, method='GET'):
 for configured in [False, True]:
     env = {k:v for k,v in os.environ.items() if not k.startswith(('IRV_', 'SPRING_', 'DATABASE_', 'S3_', 'AWS_', 'FLY_'))}
     env.update(SPRING_PROFILES_ACTIVE='auth-only', IRV_TUNNEL_ENABLED='false')
+    sensitive = [secret, fp, "audit-query-secret", "audit-header-secret", "audit-path-secret"]
     if configured: env.update(IRV_AUTH_INGRESS_SECRET=secret)
     with tempfile.TemporaryDirectory() as work:
       with open(pathlib.Path(work)/'run.log', 'w+') as log:
@@ -47,14 +48,30 @@ for configured in [False, True]:
                 for flag in ['Path=/', 'Secure', 'HttpOnly', 'SameSite=Lax']: assert flag in cookie, cookie
                 assert 'Domain=' not in cookie
                 assert json.loads(body)['token']
+                sensitive.extend([json.loads(body)['token'], cookie.split(';')[0].split('=', 1)[1]])
                 assert request(8081, '/auth/protected', headers)[0] == 401
             else: assert status == 403
             assert request(8081, '/auth/csrf', {**headers, 'X-Irv-Ingress-Key': '0'*64})[0] == 403
             assert request(8081, '/oauth2/authorization/zitadel', headers)[0] == 405
             assert request(8081, '/auth/activity', headers, 'POST')[0] in [401,403]
+            assert request(8081, '/audit-path-secret?code=audit-query-secret', {**headers, 'Authorization': 'Bearer audit-header-secret'})[0] == 404
             assert not list(pathlib.Path(work).rglob('*.mv.db'))
             print('PASS: real HTTP isolation, fail-closed configuration and cookie flags; configured=' + str(configured))
         finally:
             process.terminate()
             try: process.wait(timeout=10)
             except subprocess.TimeoutExpired: process.kill(); process.wait()
+        log.flush(); log.seek(0)
+        output = log.read()
+        rows = [json.loads(line) for line in output.splitlines() if line.startswith('{"schema":"irv.auth.v1"')]
+        assert rows, 'No JSON audit output'
+        encoded = json.dumps(rows)
+        for value in sensitive: assert value not in encoded, 'Sensitive data in audit output'
+        assert any(r['reason'] == 'route_not_exposed' for r in rows)
+        assert any(r['event'] == 'ingress' and r['outcome'] == 'failed' for r in rows)
+        completed = [r for r in rows if r['event'] == 'request' and 'status' in r]
+        started = [r for r in rows if r['event'] == 'request' and r['outcome'] == 'started']
+        assert len(completed) == len(started), 'Missing or duplicate completion'
+        assert len({r['request_id'] for r in completed}) == len(completed)
+        assert all(r['duration_ms'] >= 0 for r in completed)
+        print('PASS: real stdout JSON audit, early rejection, request pairing and secret exclusion')

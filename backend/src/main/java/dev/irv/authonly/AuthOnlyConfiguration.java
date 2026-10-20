@@ -1,5 +1,7 @@
 package dev.irv.authonly;
 
+import static dev.irv.authonly.AuthAudit.*;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -52,7 +54,7 @@ public class AuthOnlyConfiguration {
   }
 
   Map<String, Object> report(HttpServletRequest request) {
-    String fp = gate.verified(request);
+    String fp = settings.certificateRequired ? gate.verified(request) : null;
     boolean approved = gate.approved(request) != null;
     BoundSessions.Bound bound = sessions.current(request);
     String pending = bound != null ? "passed" : "pending";
@@ -114,7 +116,7 @@ public class AuthOnlyConfiguration {
       }
     }
     FilterRegistrationBean<jakarta.servlet.Filter> registration = new FilterRegistrationBean<>();
-    registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
+    registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 1);
     registration.addUrlPatterns("/*");
     registration.setDispatcherTypes(
         jakarta.servlet.DispatcherType.REQUEST,
@@ -140,6 +142,7 @@ public class AuthOnlyConfiguration {
           String type = "application/json;charset=UTF-8";
           if (request.getLocalPort() == 8080 && path.equals("/api/health")) {
             if (!read) {
+              audit(Stage.ROUTE, Outcome.FAILED, Reason.METHOD_NOT_ALLOWED);
               response.setStatus(405);
               response.setHeader("Allow", "GET, HEAD");
               return;
@@ -150,6 +153,7 @@ public class AuthOnlyConfiguration {
           } else if (request.getLocalPort() == 8081
               && Set.of("/", "/auth/status", "/auth/app.js", "/auth/style.css").contains(path)) {
             if (!read) {
+              audit(Stage.ROUTE, Outcome.FAILED, Reason.METHOD_NOT_ALLOWED);
               response.setStatus(405);
               response.setHeader("Allow", "GET, HEAD");
               return;
@@ -170,6 +174,7 @@ public class AuthOnlyConfiguration {
               "/oauth2/authorization/zitadel", "/login/oauth2/code/zitadel").contains(path)) {
             boolean post = Set.of("/auth/signup", "/auth/signup/resume", "/auth/activity", "/auth/logout", "/oauth2/authorization/zitadel").contains(path);
             if (!(post ? "POST" : "GET").equals(request.getMethod())) {
+              audit(Stage.ROUTE, Outcome.FAILED, Reason.METHOD_NOT_ALLOWED);
               response.setStatus(405); return;
             }
             if (gate.approved(request) == null) {
@@ -178,8 +183,10 @@ public class AuthOnlyConfiguration {
               response.setStatus(403); return;
             }
             if (post && !AuthSettings.ORIGIN.equals(CertificateGate.header(request, "Origin"))) {
+              audit(Stage.ORIGIN, Outcome.FAILED, Reason.INVALID_ORIGIN);
               response.setStatus(403); return;
             }
+            if (post) audit(Stage.ORIGIN, Outcome.PASSED, Reason.VALID);
             if (Set.of("/auth/protected", "/auth/activity", "/auth/logout").contains(path)
                 && sessions.current(request) == null) {
               response.setStatus(401); return;
@@ -187,6 +194,7 @@ public class AuthOnlyConfiguration {
             chain.doFilter(request, response);
             return;
           } else {
+            audit(Stage.ROUTE, Outcome.FAILED, Reason.ROUTE_NOT_EXPOSED);
             response.setStatus(404);
             return;
           }
