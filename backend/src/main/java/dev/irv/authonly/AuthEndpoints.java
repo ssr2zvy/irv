@@ -1,5 +1,7 @@
 package dev.irv.authonly;
 
+import static dev.irv.authonly.AuthAudit.*;
+
 import jakarta.servlet.http.*;
 import java.util.Map;
 import org.springframework.context.annotation.Profile;
@@ -24,10 +26,13 @@ public class AuthEndpoints {
   }
   @PostMapping("/auth/activity")
   void activity(HttpServletRequest request, HttpServletResponse response) {
-    response.setStatus(sessions.activity(request) ? 204 : 401);
+    boolean accepted = sessions.activity(request);
+    audit(Stage.ACTIVITY, accepted ? Outcome.PASSED : Outcome.FAILED, accepted ? Reason.VALID : Reason.MISSING_BINDING);
+    response.setStatus(accepted ? 204 : 401);
   }
   @PostMapping("/auth/logout")
   void logout(HttpServletRequest request, HttpServletResponse response) {
+    audit(Stage.LOGOUT, Outcome.COMPLETED, Reason.USER_LOGOUT);
     SecurityContextHolder.clearContext();
     BoundSessions.clear(request, response);
     response.setStatus(204);

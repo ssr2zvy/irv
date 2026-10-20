@@ -1,5 +1,7 @@
 package dev.irv.authonly;
 
+import static dev.irv.authonly.AuthAudit.*;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.*;
 import java.time.*;
@@ -54,7 +56,27 @@ public class ZitadelSecurity {
   @Bean JwtDecoderFactory<ClientRegistration> idTokenDecoderFactory() {
     OidcIdTokenDecoderFactory factory = new OidcIdTokenDecoderFactory();
     factory.setJwsAlgorithmResolver(registration -> SignatureAlgorithm.RS256);
-    return factory; // Spring OIDC claim validator + nonce validation retained, never replaced with decode-only.
+    return registration -> {
+      var decoder = factory.createDecoder(registration);
+      return token -> {
+        try {
+          var decoded = decoder.decode(token);
+          audit(Stage.ID_TOKEN, Outcome.PASSED, Reason.VALID);
+          return decoded;
+        } catch (RuntimeException ex) {
+          audit(Stage.ID_TOKEN, Outcome.FAILED, Reason.TOKEN_VALIDATION_FAILED);
+          throw ex;
+        }
+      };
+    }; // Original Spring signature/claim validators retained. Nonce is validated later by OIDC.
+
+  }
+
+  @Bean org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer auditFirewall() {
+    return web -> web.requestRejectedHandler((request, response, ex) -> {
+      audit(Stage.ROUTE, Outcome.FAILED, Reason.FIREWALL_REJECTED);
+      response.setStatus(400);
+    });
   }
 
   @Bean SecurityFilterChain authSecurity(HttpSecurity http, ClientRegistrationRepository clients,
@@ -66,7 +88,16 @@ public class ZitadelSecurity {
     });
     HttpSessionSecurityContextRepository contexts = new HttpSessionSecurityContextRepository();
     contexts.setDisableUrlRewriting(true);
-    http.securityContext(c -> c.securityContextRepository(contexts))
+    var tokenClient = new org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient();
+    http.addFilterAfter(new org.springframework.web.filter.OncePerRequestFilter() {
+          @Override protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res,
+              jakarta.servlet.FilterChain chain) throws java.io.IOException, jakarta.servlet.ServletException {
+            if (!Set.of("GET", "HEAD", "OPTIONS", "TRACE").contains(req.getMethod()))
+              audit(Stage.CSRF, Outcome.PASSED, Reason.VALID);
+            chain.doFilter(req, res);
+          }
+        }, org.springframework.security.web.csrf.CsrfFilter.class)
+        .securityContext(c -> c.securityContextRepository(contexts))
         .requestCache(c -> c.requestCache(new NullRequestCache()))
         .csrf(c -> c.csrfTokenRepository(new HttpSessionCsrfTokenRepository()))
         .sessionManagement(c -> c.sessionFixation(f -> f.changeSessionId()))
@@ -76,10 +107,27 @@ public class ZitadelSecurity {
             // No protected-path list: every new route inherits the same session binding checks.
             // AuthOnlyConfiguration independently keeps unfinished routes unreachable.
             .anyRequest().access(new BoundSessionAuthorization(sessions)))
-        .exceptionHandling(c -> c.authenticationEntryPoint((req, res, ex) -> res.setStatus(401))
-            .accessDeniedHandler((req, res, ex) -> res.setStatus(403)))
+        .exceptionHandling(c -> c.authenticationEntryPoint((req, res, ex) -> {
+              audit(Stage.AUTHORIZATION, Outcome.FAILED, Reason.MISSING_SESSION); res.setStatus(401);
+            }).accessDeniedHandler((req, res, ex) -> {
+              if (ex instanceof org.springframework.security.web.csrf.CsrfException)
+                audit(Stage.CSRF, Outcome.FAILED, Reason.CSRF_REJECTED);
+              else audit(Stage.AUTHORIZATION, Outcome.FAILED, Reason.ACCESS_DENIED);
+              res.setStatus(403);
+            }))
         .logout(c -> c.disable())
         .oauth2Login(c -> c.loginPage("/")
+            .tokenEndpoint(e -> e.accessTokenResponseClient(grant -> {
+              audit(Stage.TOKEN_EXCHANGE, Outcome.STARTED, Reason.NONE);
+              try {
+                var result = tokenClient.getTokenResponse(grant);
+                audit(Stage.TOKEN_EXCHANGE, Outcome.PASSED, Reason.VALID);
+                return result;
+              } catch (RuntimeException ex) {
+                audit(Stage.TOKEN_EXCHANGE, Outcome.FAILED, Reason.PROVIDER_OR_RESPONSE_FAILURE);
+                throw ex;
+              }
+            }))
             .authorizationEndpoint(e -> e.authorizationRequestResolver(resolver).authorizationRequestRepository(transactions))
             // No UserInfo merge: admission and method evidence come only from the verified ID token.
             .userInfoEndpoint(e -> e.oidcUserService(user -> new DefaultOidcUser(
@@ -91,22 +139,28 @@ public class ZitadelSecurity {
             })
             .successHandler((request, response, authentication) -> {
               try {
+                audit(Stage.OIDC, Outcome.PASSED, Reason.VALID);
                 Object started = request.getAttribute(BoundAuthorizationRequests.STARTED);
                 if (!(started instanceof Instant instant)) throw LoginPolicy.failure("login_transaction_missing");
                 OidcUser user = (OidcUser) authentication.getPrincipal();
                 LoginPolicy.validate(user.getIdToken(), instant, clock.instant());
                 sessions.create(request, user.getSubject());
+                audit(Stage.LOGIN, Outcome.COMPLETED, Reason.VALID);
                 request.getSession().removeAttribute("AUTH_ERROR");
                 response.setStatus(303); response.setHeader("Location", "/");
               } catch (OAuth2AuthenticationException ex) {
                 fail(request, response, ex.getError().getErrorCode());
               }
             })
-            .failureHandler((request, response, exception) -> fail(request, response, "login_validation_failed")));
+            .failureHandler((request, response, exception) -> {
+              audit(Stage.OIDC, Outcome.FAILED, Reason.LOGIN_VALIDATION_FAILED);
+              fail(request, response, "login_validation_failed");
+            }));
     return http.build();
   }
 
   static void fail(HttpServletRequest request, HttpServletResponse response, String code) {
+    audit(Stage.LOGIN, Outcome.FAILED, Reason.LOGIN_VALIDATION_FAILED);
     SecurityContextHolder.clearContext();
     BoundSessions.clear(request, response);
     // Fixed public error codes only, never provider messages, JWTs, auth codes or exception dumps.

@@ -188,6 +188,96 @@ class ZitadelFlowTest {
     }
   }
 
+  @Test void auditCorrelatesLoginAndSessionWithoutCredentials() throws Exception {
+    try (AuditCapture logs = new AuditCapture()) {
+      MockHttpSession session = login();
+      var probe = mvc.perform(req(get("/auth/protected")).session(session)
+          .header("X-Irv-Request-Id", "attacker-correlation-secret")).andReturn();
+      assertEquals(200, probe.getResponse().getStatus());
+      logs.has("transaction", "passed", "valid");
+      logs.has("token_exchange", "passed", "valid");
+      logs.has("id_token", "passed", "valid");
+      logs.has("oidc", "passed", "valid");
+      for (String stage : List.of("passkey", "freshness", "role", "subject")) logs.has(stage, "passed", "valid");
+      logs.has("session", "completed", "session_created");
+      logs.has("request", "completed", "http_completed");
+      var rows = logs.rows();
+      String flow = rows.stream().filter(r -> r.path("event").asText().equals("login")
+          && r.path("outcome").asText().equals("started")).findFirst().orElseThrow().path("flow_id").asText();
+      assertFalse(flow.isEmpty());
+      assertTrue(rows.stream().anyMatch(r -> r.path("event").asText().equals("callback") && r.path("flow_id").asText().equals(flow)));
+      String ref = session.getAttribute(AuthAudit.SESSION).toString();
+      assertNotEquals(session.getId(), ref);
+      assertTrue(rows.stream().anyMatch(r -> r.path("route").asText().equals("/auth/protected")
+          && r.path("session_ref").asText().equals(ref)));
+      String requestId = probe.getResponse().getHeader("X-Irv-Request-Id");
+      assertNotNull(requestId); assertNotEquals("attacker-correlation-secret", requestId);
+      assertEquals(1, rows.stream().filter(r -> r.path("request_id").asText().equals(requestId)
+          && r.has("status")).count());
+      logs.excludes(SECRET, FP, "test-access-token", "test-code", nonce, challenge, "attacker-correlation-secret");
+      // Mock servlet IDs are short counters, which can occur inside timestamps/UUIDs.
+      for (var row : rows) row.elements().forEachRemaining(value -> { if (value.isTextual()) assertNotEquals(session.getId(), value.asText()); });
+    }
+  }
+
+  @Test void auditCoversEarlyRejectionsAndRealValidationFailures() throws Exception {
+    try (AuditCapture logs = new AuditCapture()) {
+      mvc.perform(req(get("/unmapped-path-secret")).queryParam("code", "query-secret"));
+      logs.has("route", "failed", "route_not_exposed");
+      mvc.perform(req(get("/auth/signup")));
+      logs.has("route", "failed", "method_not_allowed");
+      mvc.perform(req(post("/auth/signup")));
+      logs.has("csrf", "failed", "csrf_rejected");
+      mvc.perform(req(post("/auth/signup")).with(r -> { r.removeHeader("Origin"); return r; }));
+      logs.has("origin", "failed", "invalid_origin");
+      mvc.perform(req(get("/auth/protected")).with(r -> { r.removeHeader("X-Irv-Ingress-Key"); return r; }));
+      logs.has("ingress", "failed", "invalid_secret");
+      mvc.perform(req(get("/auth/protected")).with(r -> { r.removeHeader("X-Irv-Cert-Revoked"); r.addHeader("X-Irv-Cert-Revoked", "true"); return r; }));
+      logs.has("certificate", "failed", "revoked_or_unknown");
+      for (String bad : List.of("signature", "nonce", "password", "stale", "role")) {
+        mode = bad; Start start = start(); finish(start, start.state());
+      }
+      logs.has("id_token", "failed", "token_validation_failed");
+      logs.has("oidc", "failed", "login_validation_failed");
+      logs.has("passkey", "failed", "passkey_evidence_rejected");
+      logs.has("freshness", "failed", "fresh_authentication_required");
+      logs.has("role", "failed", "required_role_missing");
+      logs.excludes(SECRET, FP, "unmapped-path-secret", "query-secret", "test-access-token", "test-code");
+      for (var row : logs.rows()) if (row.has("status")) assertTrue(row.path("duration_ms").asLong() >= 0);
+    }
+  }
+
+  @Test void auditRecordsTransactionExpirySessionExpiryActivityAndLogout() throws Exception {
+    try (AuditCapture logs = new AuditCapture()) {
+      Start invalid = start(); finish(invalid, "incorrect-state");
+      logs.has("transaction", "failed", "invalid_state");
+      Start expired = start();
+      var pending = (BoundAuthorizationRequests.Pending) expired.session().getAttribute(BoundAuthorizationRequests.KEY);
+      expired.session().setAttribute(BoundAuthorizationRequests.KEY, new BoundAuthorizationRequests.Pending(
+          pending.request(), pending.fingerprint(), Instant.now().minusSeconds(301)));
+      finish(expired, expired.state());
+      logs.has("transaction", "failed", "transaction_expired");
+      MockHttpSession session = login();
+      var bound = (BoundSessions.Bound) session.getAttribute(BoundSessions.KEY);
+      session.setAttribute(BoundSessions.KEY, new BoundSessions.Bound(bound.subject(), FP, bound.created(), Instant.now().minusSeconds(301)));
+      mvc.perform(req(get("/auth/protected")).session(session));
+      logs.has("session", "failed", "idle_expired");
+      session = login();
+      session.setAttribute(BoundSessions.KEY, new BoundSessions.Bound("123", FP, Instant.now().minusSeconds(28801), Instant.now()));
+      mvc.perform(req(get("/auth/protected")).session(session));
+      logs.has("session", "failed", "absolute_expired");
+      session = login();
+      MvcResult csrf = mvc.perform(req(get("/auth/csrf")).session(session)).andReturn();
+      String token = mapper.readTree(csrf.getResponse().getContentAsString()).get("token").asText();
+      mvc.perform(req(post("/auth/activity")).session(session).header("X-CSRF-TOKEN", token));
+      logs.has("activity", "passed", "valid");
+      mvc.perform(req(post("/auth/logout")).session(session).header("X-CSRF-TOKEN", token));
+      logs.has("logout", "completed", "user_logout");
+      logs.has("session", "completed", "session_invalidated");
+      logs.excludes(token, SECRET, FP, "test-code", "test-access-token");
+    }
+  }
+
   @Test void validLoginProtectsBackendAndNeverDisplaysTokens() throws Exception {
     MockHttpSession session = login();
     assertEquals(200, mvc.perform(req(get("/auth/protected")).session(session)).andReturn().getResponse().getStatus());
@@ -209,6 +299,7 @@ class ZitadelFlowTest {
     assertEquals(404, mvc.perform(req(post("/auth/signup")).with(r -> { r.setLocalPort(8080); return r; })).andReturn().getResponse().getStatus());
   }
   @Test void signupEndpointProvisionsAndKeepsUserUnauthenticatedUntilLogin() throws Exception {
+    try (AuditCapture logs = new AuditCapture()) {
     MvcResult c = mvc.perform(req(get("/auth/csrf"))).andReturn();
     MockHttpSession session = (MockHttpSession) c.getRequest().getSession(false);
     String token = mapper.readTree(c.getResponse().getContentAsString()).get("token").asText();
@@ -221,6 +312,12 @@ class ZitadelFlowTest {
     assertEquals(200, mvc.perform(req(post("/auth/signup/resume")).session(session).header("X-CSRF-TOKEN", token)).andReturn().getResponse().getStatus());
     assertEquals(403, mvc.perform(req(post("/auth/signup/resume")).session(session).header("X-CSRF-TOKEN", token)
         .with(r -> { r.removeHeader("Origin"); r.addHeader("Origin", "https://wrong.invalid"); return r; })).andReturn().getResponse().getStatus());
+    logs.has("invite", "passed", "invite_reserved");
+    for (String stage : List.of("user_create", "enrollment_link", "role_grant")) logs.has(stage, "passed", "valid");
+    logs.has("signup", "completed", "valid");
+    logs.has("enrollment_resume", "passed", "valid");
+    logs.excludes("i".repeat(43), "newuser", "new@example.com", "secret%2Bvalue", "secret+value", "test-token", SECRET, FP);
+    }
   }
   @Test void rejectsBadClaimsAndSignature() throws Exception {
     for (String invalid : List.of("password", "u2f", "stale", "role", "subject", "issuer", "audience", "expired", "nonce", "signature")) {

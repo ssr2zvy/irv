@@ -59,3 +59,9 @@ then separately confirm the current boundary still blocks that controller.
 They cover missing login/binding, wrong account, certificate switching/revocation,
 forged ingress, both expiry limits, CSRF and Origin. Existing OAuth/invite tests
 and packaged HTTP isolation checks remain the live-profile regression tests.
+
+## Logging
+
+[Authentication logging](authentication-logging.md) provides the shared outer
+request logger and explicit authentication stage events. Preserve its ordering
+before the feature boundary and security filters when introducing new routes.
