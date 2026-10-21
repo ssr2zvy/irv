@@ -17,7 +17,7 @@ Keep the existing single Fly Machine, /data volume, tunnel token, ingress secret
 | Setting | Value / purpose |
 |---|---|
 | TUNNEL_TOKEN | Existing tunnel secret |
-| IRV_AUTH_INGRESS_SECRET | Existing 64-hex forwarding secret |
+| IRV_AUTH_INGRESS_SECRET | Forwarding secret of 32-256 printable ASCII characters (U+0021-U+007E), with no whitespace |
 | IRV_AUTH_CERT_REQUIRED | Defaults true; keep true now |
 | IRV_AUTH_ENROLLMENT_ENABLED | Set true to expose working signup; defaults false until configured |
 | IRV_ZITADEL_ENROLLMENT_TOKEN | New dedicated, expiring ZITADEL service-account PAT with ORG_USER_MANAGER membership ONLY in irv-users (395285989452532411) |
@@ -25,6 +25,8 @@ Keep the existing single Fly Machine, /data volume, tunnel token, ingress secret
 | IRV_AUTH_INVITE_DB | Defaults /data/auth/invites, the file prefix for the durable H2 ledger |
 
 Remove obsolete IRV_AUTH_ADMISSIONS_JSON and IRV_AUTH_ALLOWED_CERT_SHA256 secrets. This implementation does not read them; leaving their values does not retain the old restrictions. No certificate fingerprint needs to be entered into Fly.
+
+Set the identical literal ingress-secret value in Fly's `IRV_AUTH_INGRESS_SECRET` and Cloudflare's `X-Irv-Ingress-Key` request-header Transform Rule. Do not trim, decode, normalize or change its case on either side. Use cryptographically generated randomness; merely matching the allowed character and length format does not make a value random. A 64-character hexadecimal value remains valid and can optionally be generated with `openssl rand -hex 32`. Existing values need no change when they meet the new format and match exactly on both sides. Certificate SHA-256 fingerprints are separate and must still be exactly 64 hexadecimal characters.
 
 Do not reuse the IAM_OWNER setup PAT as the runtime enrollment token. Use a dedicated service account with ZITADEL administrative membership ORG_USER_MANAGER scoped to irv-users, then create its expiring PAT. You can repurpose the existing irv-upa setup service account: first add the scoped role, remove its IAM_OWNER membership while retaining your separate human administrator, and rotate its PAT. This avoids requiring another service-account slot. This is a ZITADEL administrative role, NOT the irv_user project role. Source permission definitions include user.write, user.read and user.grant.write. The runtime token can manage users in this organization; leaking it remains serious. This patch does not automate service-account creation or change provider policies.
 

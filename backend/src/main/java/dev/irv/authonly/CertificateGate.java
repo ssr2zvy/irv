@@ -22,7 +22,7 @@ final class CertificateGate {
         ? Reason.UNTRUSTED_CONNECTION : Reason.VALID;
     if (reason == Reason.VALID) {
       String supplied = header(request, "X-Irv-Ingress-Key");
-      if (supplied.length() != 64 || !MessageDigest.isEqual(
+      if (!supplied.chars().allMatch(c -> c >= 0x21 && c <= 0x7e) || !MessageDigest.isEqual(
           settings.ingressSecret.getBytes(StandardCharsets.US_ASCII), supplied.getBytes(StandardCharsets.US_ASCII)))
         reason = Reason.INVALID_SECRET;
     }

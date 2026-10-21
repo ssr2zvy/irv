@@ -19,8 +19,9 @@ public final class AuthSettings {
 
   AuthSettings(Environment env, ObjectMapper mapper) {
     ingressSecret = env.getProperty("IRV_AUTH_INGRESS_SECRET", "");
-    if (!ingressSecret.isEmpty() && !ingressSecret.matches("[a-fA-F0-9]{64}"))
-      throw new IllegalStateException("IRV_AUTH_INGRESS_SECRET must be 64 hex characters");
+    if (!ingressSecret.isEmpty() && !ingressSecret.matches("[!-~]{32,256}"))
+      throw new IllegalStateException(
+          "IRV_AUTH_INGRESS_SECRET must be 32-256 printable ASCII characters (U+0021 through U+007E), with no whitespace");
     certificateRequired = flag(env, "IRV_AUTH_CERT_REQUIRED", true);
     enrollmentEnabled = flag(env, "IRV_AUTH_ENROLLMENT_ENABLED", false);
     enrollmentToken = env.getProperty("IRV_ZITADEL_ENROLLMENT_TOKEN", "");
