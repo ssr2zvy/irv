@@ -39,6 +39,10 @@ for configured in [False, True]:
             status, h, body = request(8081, '/auth/status', headers)
             report = json.loads(body)
             assert status == 200 and report['authenticated'] is False and len(report['checks']) == 8
+            if not configured:
+                checks = {check['id']: check for check in report['checks']}
+                assert checks['certificate']['status'] == 'not_configured'
+                assert checks['approval']['status'] == 'not_configured'
             assert secret.encode() not in body and fp.encode() not in body
             status, h, body = request(8081, '/auth/csrf', headers)
             if configured:
