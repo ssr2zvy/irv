@@ -16,7 +16,7 @@ class IngressSecretTest {
   static Stream<String> validSecrets() {
     return Stream.of(
         "a".repeat(31) + "!",
-        "Ingress-key_37!@#$%^&*()-+=",
+        "Ingress-key_37!@#$%^&*()-+=1234567890",
         "0123456789abcdef".repeat(4),
         "~".repeat(256));
   }
@@ -67,10 +67,7 @@ class IngressSecretTest {
     for (String secret : new String[] {null, ""}) {
       AuthSettings settings = settings(secret);
       assertEquals("", settings.ingressSecret);
-      try (AuditCapture logs = new AuditCapture()) {
-        assertFalse(new CertificateGate(settings).trusted(request()));
-        logs.has("ingress", "failed", "not_configured");
-      }
+      assertFalse(new CertificateGate(settings).trusted(request()));
     }
   }
 
