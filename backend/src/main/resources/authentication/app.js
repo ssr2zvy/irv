@@ -26,8 +26,9 @@ function signupPage(focus = false) {
   byId('signup-section').hidden = !open;
   byId('signup-back').hidden = !open;
   byId('page-title').textContent = open ? 'Create account' : authenticated ? 'Signed in' : 'Sign in';
+  byId('page-title').hidden = !open && !authenticated;
   document.title = 'irv · ' + byId('page-title').textContent;
-  if (focus) {byId('page-title').focus(); window.scrollTo(0, 0);}
+  if (focus) {(byId('page-title').hidden ? byId('login') : byId('page-title')).focus(); window.scrollTo(0, 0);}
 }
 if (home) {
   byId('open-signup').addEventListener('click', () => {location.hash = 'signup';});
