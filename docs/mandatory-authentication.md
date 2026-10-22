@@ -26,10 +26,32 @@ select a runtime mode.
 - A future endpoint requires both explicit boundary integration and authenticated
   session/ownership enforcement. Spring's catch-all uses bound-session authorization.
 
-The signup form follows `IRV_AUTH_ENROLLMENT_ENABLED`; this patch does not enable
-registration or replace its credentials/invites. When disabled, the page says so.
-Existing enrollment/token/invite, Cloudflare header and ingress-secret settings
-remain unchanged. See [enrollment](flow2-enrollment.md) and [login](zitadel-login.md).
+Signup is available when the enrollment provider token and at least one unexpired
+configured invite exist. If `IRV_AUTH_ENROLLMENT_ENABLED` is omitted, this configuration
+enables signup automatically. An explicit `false` still disables it. An explicit
+`true` with a missing/invalid provider token still rejects startup. Consumed invites
+remain single use, independently enforced by the durable ledger.
+
+`GET /auth/status` logs `signup_availability` with one fixed reason: `valid`,
+`enrollment_disabled`, `provider_token_missing`, `invites_not_configured`, or
+`invites_expired`. The sign-in page hides unavailable account creation without
+configuration prose. No token, invite, email or identity is added to logs.
+
+The sign-in page uses menu rows, compact headers and icon navigation adapted from
+Telugu-now Settings. Create account opens a separate form view; the bottom-right
+lock opens diagnostics. Operation failures use a temporary accessible notice.
+Diagnostics retain all eight checks and place limitations in an expandable section.
+
+`POST /auth/login` requires certificate admission, Origin and CSRF. It creates the
+same certificate-bound, expiring, single-use OAuth transaction and returns JSON
+containing the fixed provider authorization URL. The browser validates the exact
+provider origin/path then navigates using `location.assign`. It never submits an
+external form or follows a redirect through fetch. The CSP retains `form-action
+'self'`. The former `/oauth2/authorization/zitadel` bootstrap route is no longer
+exposed. Callback validation, PKCE, state, nonce, freshness and account role checks
+are preserved. Do not log the authorization URL: it contains state/nonce values.
+
+See [enrollment](flow2-enrollment.md) and [login](zitadel-login.md).
 The certificate-required setting remains the existing operator policy.
 
 ## Feature isolation

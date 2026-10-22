@@ -16,7 +16,7 @@ Two independent controls apply:
 |---|---|---|
 | `/auth/csrf` | GET | Trusted ingress and certificate admission |
 | `/login/oauth2/code/zitadel` | GET | Same ingress, bound login transaction, state/nonce/PKCE and token validation |
-| `/oauth2/authorization/zitadel` | POST | Same ingress, Origin and CSRF |
+| `/auth/login` | POST | Same ingress, Origin and CSRF; returns provider URL as JSON |
 | `/auth/signup`, `/auth/signup/resume` | POST | Same ingress, Origin and CSRF; signup requires invite |
 
 The boundary directly serves `/`, `/auth/diagnostics`, `/auth/app.js`, `/auth/style.css` and

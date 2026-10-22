@@ -78,13 +78,18 @@ public class ZitadelSecurity {
     });
   }
 
-  @Bean SecurityFilterChain authSecurity(HttpSecurity http, ClientRegistrationRepository clients,
-      BoundAuthorizationRequests transactions, BoundSessions sessions, Clock clock) throws Exception {
+  @Bean DefaultOAuth2AuthorizationRequestResolver loginRequestResolver(ClientRegistrationRepository clients) {
     var resolver = new DefaultOAuth2AuthorizationRequestResolver(clients, "/oauth2/authorization");
     resolver.setAuthorizationRequestCustomizer(builder -> {
       OAuth2AuthorizationRequestCustomizers.withPkce().accept(builder);
       builder.additionalParameters(params -> { params.put("prompt", "login"); params.put("max_age", 0); });
     });
+    return resolver;
+  }
+
+  @Bean SecurityFilterChain authSecurity(HttpSecurity http, ClientRegistrationRepository clients,
+      BoundAuthorizationRequests transactions, BoundSessions sessions, Clock clock,
+      DefaultOAuth2AuthorizationRequestResolver resolver) throws Exception {
     HttpSessionSecurityContextRepository contexts = new HttpSessionSecurityContextRepository();
     contexts.setDisableUrlRewriting(true);
     var tokenClient = new org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient();
@@ -102,7 +107,7 @@ public class ZitadelSecurity {
         .sessionManagement(c -> c.sessionFixation(f -> f.changeSessionId()))
         .authorizeHttpRequests(c -> c
             .requestMatchers(org.springframework.http.HttpMethod.GET, "/auth/csrf", "/login/oauth2/code/zitadel").permitAll()
-            .requestMatchers(org.springframework.http.HttpMethod.POST, "/auth/signup", "/auth/signup/resume", "/oauth2/authorization/zitadel").permitAll()
+            .requestMatchers(org.springframework.http.HttpMethod.POST, "/auth/signup", "/auth/signup/resume", "/auth/login").permitAll()
             // No protected-path list: every new route inherits the same session binding checks.
             // ApplicationBoundaryConfiguration independently keeps unfinished routes unreachable.
             .anyRequest().access(new BoundSessionAuthorization(sessions)))

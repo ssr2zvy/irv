@@ -14,7 +14,7 @@ public final class AuthSettings {
   public static final String ORG = "395285989452532411";
   public static final String ROLE = "irv_user";
   final String ingressSecret, enrollmentToken, inviteDb;
-  final boolean certificateRequired, enrollmentEnabled;
+  final boolean certificateRequired, enrollmentEnabled, enrollmentExplicitlyDisabled;
   final Map<String, java.time.Instant> invites;
 
   AuthSettings(Environment env, ObjectMapper mapper) {
@@ -23,7 +23,6 @@ public final class AuthSettings {
       throw new IllegalStateException(
           "IRV_AUTH_INGRESS_SECRET must be 32-256 printable ASCII characters (U+0021 through U+007E), with no whitespace");
     certificateRequired = flag(env, "IRV_AUTH_CERT_REQUIRED", true);
-    enrollmentEnabled = flag(env, "IRV_AUTH_ENROLLMENT_ENABLED", false);
     enrollmentToken = env.getProperty("IRV_ZITADEL_ENROLLMENT_TOKEN", "");
     inviteDb = env.getProperty("IRV_AUTH_INVITE_DB", "/data/auth/invites");
     try {
@@ -36,11 +35,22 @@ public final class AuthSettings {
       }
       invites = Map.copyOf(parsed);
     } catch (Exception ex) { throw new IllegalStateException("Invalid IRV_AUTH_INVITES_JSON: expected SHA256-to-UTC-expiry object"); }
+    enrollmentExplicitlyDisabled = "false".equals(env.getProperty("IRV_AUTH_ENROLLMENT_ENABLED"));
+    enrollmentEnabled = flag(env, "IRV_AUTH_ENROLLMENT_ENABLED", !enrollmentToken.isBlank() && !invites.isEmpty());
     if (enrollmentEnabled && (enrollmentToken.isBlank() || enrollmentToken.chars().anyMatch(Character::isWhitespace)))
       throw new IllegalStateException("Enrollment requires IRV_ZITADEL_ENROLLMENT_TOKEN");
     if (!inviteDb.matches("/[a-zA-Z0-9_./-]+") || inviteDb.contains(".."))
       throw new IllegalStateException("IRV_AUTH_INVITE_DB must be an absolute file path");
   }
+  AuthAudit.Reason signupAvailability(java.time.Instant now) {
+    if (enrollmentExplicitlyDisabled) return AuthAudit.Reason.ENROLLMENT_DISABLED;
+    if (enrollmentToken.isBlank()) return AuthAudit.Reason.PROVIDER_TOKEN_MISSING;
+    if (invites.isEmpty()) return AuthAudit.Reason.INVITES_NOT_CONFIGURED;
+    if (invites.values().stream().noneMatch(now::isBefore)) return AuthAudit.Reason.INVITES_EXPIRED;
+    return AuthAudit.Reason.VALID;
+  }
+  boolean signupAvailable(java.time.Instant now) { return signupAvailability(now) == AuthAudit.Reason.VALID; }
+
   private static boolean flag(Environment env, String name, boolean fallback) {
     String value = env.getProperty(name, Boolean.toString(fallback));
     if (!Set.of("true", "false").contains(value)) throw new IllegalStateException("Invalid boolean: " + name);
