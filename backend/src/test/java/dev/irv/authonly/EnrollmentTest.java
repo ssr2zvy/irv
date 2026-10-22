@@ -88,7 +88,14 @@ class EnrollmentTest {
   }
 
   @Test void provisionsPasswordlessAccountAndRoleThenResumesOnlySameSessionCertificate() throws Exception {
-    AuthSettings s = new AuthSettings(env(), JSON); Provider p = new Provider(s);
+    verifyProvisioningAndReplay(env());
+  }
+  @Test void plaintextInviteProvisionsAndCannotReplayAfterRestart() throws Exception {
+    verifyProvisioningAndReplay(env().withProperty("IRV_AUTH_INVITES_JSON", "{}")
+        .withProperty("IRV_AUTH_INVITE_CODES_JSON", "[{\"code\":\"" + CODE + "\",\"expiresAt\":\"2026-10-17T00:00:00Z\"}]"));
+  }
+  void verifyProvisioningAndReplay(MockEnvironment environment) throws Exception {
+    AuthSettings s = new AuthSettings(environment, JSON); Provider p = new Provider(s);
     try (InviteLedger ledger = new InviteLedger(s)) {
       Enrollment e = service(s, ledger, p); MockHttpServletRequest r = request();
       String link = signup(e, r);

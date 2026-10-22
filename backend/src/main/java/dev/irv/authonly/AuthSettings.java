@@ -25,16 +25,39 @@ public final class AuthSettings {
     certificateRequired = flag(env, "IRV_AUTH_CERT_REQUIRED", true);
     enrollmentToken = env.getProperty("IRV_ZITADEL_ENROLLMENT_TOKEN", "");
     inviteDb = env.getProperty("IRV_AUTH_INVITE_DB", "/data/auth/invites");
+    Map<String, java.time.Instant> parsed = new HashMap<>();
     try {
       Map<String, String> input = mapper.readValue(env.getProperty("IRV_AUTH_INVITES_JSON", "{}"), new TypeReference<>() {});
       if (input == null || input.size() > 1000) throw new IllegalArgumentException();
-      Map<String, java.time.Instant> parsed = new HashMap<>();
       for (var entry : input.entrySet()) {
         if (!entry.getKey().matches("[a-f0-9]{64}")) throw new IllegalArgumentException();
         parsed.put(entry.getKey(), java.time.Instant.parse(entry.getValue()));
       }
-      invites = Map.copyOf(parsed);
     } catch (Exception ex) { throw new IllegalStateException("Invalid IRV_AUTH_INVITES_JSON: expected SHA256-to-UTC-expiry object"); }
+    // Parse separately so configuration errors identify the setting without exposing its value.
+    try {
+      var input = mapper.reader().with(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .readTree(env.getProperty("IRV_AUTH_INVITE_CODES_JSON", "[]"));
+      if (input == null || !input.isArray() || input.size() > 1000) throw new IllegalArgumentException();
+      for (var entry : input) {
+        if (!entry.isObject() || entry.size() != 2 || !entry.path("code").isTextual()
+            || !entry.path("expiresAt").isTextual()) throw new IllegalArgumentException();
+        String code = entry.path("code").textValue();
+        String expiry = entry.path("expiresAt").textValue();
+        if (!code.matches("[A-Za-z0-9_-]{43,128}") || !expiry.endsWith("Z")) throw new IllegalArgumentException();
+        var instant = java.time.Instant.parse(expiry);
+        var previous = parsed.putIfAbsent(Enrollment.hash(code), instant);
+        // Never silently extend or shorten an invite configured in both formats.
+        if (previous != null && !previous.equals(instant)) throw new IllegalArgumentException();
+      }
+      if (parsed.size() > 1000) throw new IllegalArgumentException();
+    } catch (Exception ex) {
+      // Deliberately omit the parser exception: its message can contain the raw secret.
+      throw new IllegalStateException("Invalid IRV_AUTH_INVITE_CODES_JSON: expected code/UTC expiresAt array; "
+          + "codes must be 43-128 letters, digits, underscores or hyphens; maximum 1000 combined invites; "
+          + "duplicate codes must have identical expiry");
+    }
+    invites = Map.copyOf(parsed);
     enrollmentExplicitlyDisabled = "false".equals(env.getProperty("IRV_AUTH_ENROLLMENT_ENABLED"));
     enrollmentEnabled = flag(env, "IRV_AUTH_ENROLLMENT_ENABLED", !enrollmentToken.isBlank() && !invites.isEmpty());
     if (enrollmentEnabled && (enrollmentToken.isBlank() || enrollmentToken.chars().anyMatch(Character::isWhitespace)))

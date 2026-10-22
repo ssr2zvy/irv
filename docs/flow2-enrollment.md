@@ -12,7 +12,7 @@ Username is a login label. The permanent account key is the verified OIDC issuer
 
 ## Deployment settings
 
-Keep the existing single Fly Machine, /data volume, tunnel token, ingress secret, Cloudflare rejection/overwrite rules and auth-only profile. No deploy.sh, workflow, Containerfile, public IP or extra application is needed.
+Keep the existing single Fly Machine, /data volume, tunnel token, ingress secret, Cloudflare rejection/overwrite rules and mandatory authentication in every profile. No deploy.sh, workflow, Containerfile, public IP or extra application is needed.
 
 | Setting | Value / purpose |
 |---|---|
@@ -21,6 +21,7 @@ Keep the existing single Fly Machine, /data volume, tunnel token, ingress secret
 | IRV_AUTH_CERT_REQUIRED | Defaults true; keep true now |
 | IRV_AUTH_ENROLLMENT_ENABLED | Optional override: false disables signup; when omitted, a configured provider token and invites enable it automatically |
 | IRV_ZITADEL_ENROLLMENT_TOKEN | New dedicated, expiring ZITADEL service-account PAT with ORG_USER_MANAGER membership ONLY in irv-users (395285989452532411) |
+| IRV_AUTH_INVITE_CODES_JSON | JSON array of plaintext code/UTC expiresAt entries; backend hashes codes automatically. See [signup setup](signup-setup.md). |
 | IRV_AUTH_INVITES_JSON | JSON object mapping SHA256 of each high-entropy invite to its ISO UTC expiry |
 | IRV_AUTH_INVITE_DB | Defaults /data/auth/invites, the file prefix for the durable H2 ledger |
 
@@ -32,7 +33,11 @@ Do not reuse the IAM_OWNER setup PAT as the runtime enrollment token. Use a dedi
 
 Set the token and invite JSON through the existing Fly Secrets interface on iruvu, then enable enrollment and deploy. Missing token with enrollment enabled fails startup; no invites means no signup. Existing authorized passkey users can still log in with signup disabled. Do not put token values in source, GitHub issues, screenshots, or command arguments.
 
-## Generate and issue an invite
+## Configure invites without a script
+
+Use `IRV_AUTH_INVITE_CODES_JSON` as described in [signup setup](signup-setup.md). It accepts random password-manager strings, hashes them at startup and shares the existing durable single-use ledger. Hash-only invites below remain supported.
+
+## Optional script: generate and issue a hash-only invite
 
 On a trusted development terminal (including the repository Codespace), run:
 
