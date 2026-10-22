@@ -17,9 +17,10 @@ kill_timeout = "60s"
   IRV_PUBLIC_STATUS_ENABLED = "false"
   IRV_TUNNEL_ENABLED = "true"
 
-# Auth-only Flow 2: temporary certificate binding, invite-gated signup.
+# Authentication Flow 2: temporary certificate binding, invite-gated signup.
 # Required for login: IRV_AUTH_INGRESS_SECRET; account must have the irv_user provider role.
-# Signup: IRV_AUTH_ENROLLMENT_ENABLED=true, IRV_ZITADEL_ENROLLMENT_TOKEN, IRV_AUTH_INVITES_JSON.
+# Signup: IRV_ZITADEL_ENROLLMENT_TOKEN and IRV_AUTH_INVITES_JSON.
+# IRV_AUTH_ENROLLMENT_ENABLED is optional; explicit false disables signup.
 # Invite ledger uses existing /data volume; no PostgreSQL/Tigris/sandbox runtime.
 # See docs/flow2-enrollment.md. Certificate gate defaults ON; invites always required.
 # DATABASE_URL / DATABASE_USER / DATABASE_PASSWORD: later PostgreSQL setup.

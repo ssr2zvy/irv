@@ -19,7 +19,7 @@ Keep the existing single Fly Machine, /data volume, tunnel token, ingress secret
 | TUNNEL_TOKEN | Existing tunnel secret |
 | IRV_AUTH_INGRESS_SECRET | Forwarding secret of 32-256 printable ASCII characters (U+0021-U+007E), with no whitespace |
 | IRV_AUTH_CERT_REQUIRED | Defaults true; keep true now |
-| IRV_AUTH_ENROLLMENT_ENABLED | Set true to expose working signup; defaults false until configured |
+| IRV_AUTH_ENROLLMENT_ENABLED | Optional override: false disables signup; when omitted, a configured provider token and invites enable it automatically |
 | IRV_ZITADEL_ENROLLMENT_TOKEN | New dedicated, expiring ZITADEL service-account PAT with ORG_USER_MANAGER membership ONLY in irv-users (395285989452532411) |
 | IRV_AUTH_INVITES_JSON | JSON object mapping SHA256 of each high-entropy invite to its ISO UTC expiry |
 | IRV_AUTH_INVITE_DB | Defaults /data/auth/invites, the file prefix for the durable H2 ledger |

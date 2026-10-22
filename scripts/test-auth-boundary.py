@@ -46,7 +46,7 @@ for profile, configured in [("", False), ("", True), ("production", True), ("aut
                 assert report['authenticated'] is False and len(report['checks']) == 8
                 assert secret.encode() not in body and fp.encode() not in body
                 home = request(8081, '/', headers)[2].decode()
-                assert 'class="auth-lock"' in home and 'id="signup-form"' in home
+                assert 'class="auth-lock icon-action"' in home and 'id="signup-form"' in home
                 assert 'id="checks"' not in home and 'AUTH-ONLY' not in home
                 assert 'id="checks"' in request(8081, '/auth/diagnostics', headers)[2].decode()
             status, h, body = request(8081, '/auth/csrf', headers)
@@ -59,9 +59,21 @@ for profile, configured in [("", False), ("", True), ("production", True), ("aut
                 assert json.loads(body)['token']
                 sensitive.extend([json.loads(body)['token'], cookie.split(';')[0].split('=', 1)[1]])
                 assert request(8081, '/auth/protected', headers)[0] == 401
+                token = json.loads(body)
+                login_headers = {**headers, 'Cookie': cookie.split(';')[0], 'Origin':'https://iruvu.space', token['headerName']:token['token']}
+                login_status, login_h, login_body = request(8081, '/auth/login', login_headers, 'POST')
+                assert login_status == 200
+                assert login_h['Content-Type'].startswith('application/json')
+                assert 'Location' not in login_h and 'Content-Disposition' not in login_h
+                destination = json.loads(login_body)['authorizationUrl']
+                assert destination.startswith('https://irv-instance-4ftbgu.us1.zitadel.cloud/oauth/v2/authorize?')
+                sensitive.append(destination)
+                assert 'code_challenge_method=S256' in destination and 'nonce=' in destination and 'state=' in destination
+                assert request(8081, '/auth/login', {**headers, 'Origin':'https://iruvu.space'}, 'POST')[0] == 403
+                assert request(8081, '/oauth2/authorization/zitadel', headers, 'POST')[0] == 404
             else: assert status == 403
             assert request(8081, '/auth/csrf', {**headers, 'X-Irv-Ingress-Key': '0'*64})[0] == 403
-            assert request(8081, '/oauth2/authorization/zitadel', headers)[0] == 405
+            assert request(8081, '/auth/login', headers)[0] == 405
             assert request(8081, '/auth/activity', headers, 'POST')[0] in [401,403]
             assert request(8081, '/audit-path-secret?code=audit-query-secret', {**headers, 'Authorization': 'Bearer audit-header-secret'})[0] == 404
             assert not list(pathlib.Path(work).rglob('*.mv.db'))

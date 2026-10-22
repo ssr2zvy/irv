@@ -13,7 +13,7 @@ final class AuthAudit {
   enum Stage { REQUEST, ROUTE, INGRESS, CERTIFICATE, ORIGIN, CSRF, LOGIN, CALLBACK,
     TRANSACTION, TOKEN_EXCHANGE, ID_TOKEN, OIDC, PASSKEY, FRESHNESS, ROLE, SUBJECT,
     SESSION, AUTHORIZATION, ACTIVITY, LOGOUT, SIGNUP, INPUT, INVITE, USER_CREATE,
-    ENROLLMENT_LINK, ROLE_GRANT, ENROLLMENT_RESUME }
+    ENROLLMENT_LINK, ROLE_GRANT, ENROLLMENT_RESUME, SIGNUP_AVAILABILITY }
   enum Outcome { STARTED, PASSED, FAILED, NOT_REQUIRED, COMPLETED }
   enum Reason { NONE, VALID, NOT_CONFIGURED, UNTRUSTED_CONNECTION, INVALID_SECRET,
     NOT_VERIFIED, REVOKED_OR_UNKNOWN, INVALID_FINGERPRINT, POLICY_DISABLED,
@@ -24,7 +24,7 @@ final class AuthAudit {
     TOKEN_VALIDATION_FAILED, LOGIN_VALIDATION_FAILED, PASSKEY_EVIDENCE_REJECTED,
     FRESH_AUTHENTICATION_REQUIRED, REQUIRED_ROLE_MISSING, INVALID_SUBJECT,
     SESSION_CREATED, SESSION_INVALIDATED, SESSION_REPLACED, USER_LOGOUT,
-    ENROLLMENT_DISABLED, ALREADY_SIGNED_IN, RATE_LIMITED, INVALID_INPUT,
+    ENROLLMENT_DISABLED, PROVIDER_TOKEN_MISSING, INVITES_NOT_CONFIGURED, INVITES_EXPIRED, ALREADY_SIGNED_IN, RATE_LIMITED, INVALID_INPUT,
     INVITE_INVALID_OR_EXPIRED, INVITE_ALREADY_RESERVED, LEDGER_FAILURE,
     INVITE_RESERVED, REVIEW_REQUIRED, RESUME_UNAVAILABLE, UNEXPECTED_ERROR,
     HTTP_REJECTED, HTTP_COMPLETED, ASYNC_TIMEOUT }
@@ -36,7 +36,7 @@ final class AuthAudit {
   private static final org.slf4j.Logger LOG = LoggerFactory.getLogger("irv.auth.audit");
   private static final Set<String> ROUTES = Set.of("/", "/api/health", "/auth/status", "/auth/diagnostics", "/auth/app.js",
       "/auth/style.css", "/auth/csrf", "/auth/protected", "/auth/activity", "/auth/logout",
-      "/auth/signup", "/auth/signup/resume", "/oauth2/authorization/zitadel", "/login/oauth2/code/zitadel");
+      "/auth/signup", "/auth/signup/resume", "/auth/login", "/login/oauth2/code/zitadel");
 
   static final class Context {
     final String requestId = UUID.randomUUID().toString();

@@ -123,9 +123,12 @@ class ZitadelFlowTest {
     assertEquals(200, csrf.getResponse().getStatus());
     MockHttpSession session = (MockHttpSession) csrf.getRequest().getSession(false);
     String token = mapper.readTree(csrf.getResponse().getContentAsString()).get("token").asText();
-    MvcResult redirect = mvc.perform(req(post("/oauth2/authorization/zitadel")).session(session).param("_csrf", token)).andReturn();
-    assertEquals(302, redirect.getResponse().getStatus());
-    Map<String, String> query = params(URI.create(redirect.getResponse().getHeader("Location")).getRawQuery());
+    MvcResult redirect = mvc.perform(req(post("/auth/login")).session(session).param("_csrf", token)).andReturn();
+    assertEquals(200, redirect.getResponse().getStatus());
+    assertTrue(redirect.getResponse().getContentType().startsWith("application/json"));
+    assertNull(redirect.getResponse().getHeader("Content-Disposition"));
+    assertNull(redirect.getResponse().getHeader("Location"));
+    Map<String, String> query = params(URI.create(mapper.readTree(redirect.getResponse().getContentAsString()).get("authorizationUrl").asText()).getRawQuery());
     assertEquals("S256", query.get("code_challenge_method"));
     assertEquals("login", query.get("prompt")); assertEquals("0", query.get("max_age"));
     assertNotNull(query.get("nonce")); assertNotNull(query.get("state"));
@@ -183,6 +186,22 @@ class ZitadelFlowTest {
         if (fault.equals("revoked")) { r.removeHeader("X-Irv-Cert-Revoked"); r.addHeader("X-Irv-Cert-Revoked", "true"); }
         return r;
       })).andReturn().getResponse().getStatus(), fault);
+    }
+  }
+
+  @Test void loginHandoffRequiresAdmissionOriginAndCsrf() throws Exception {
+    assertEquals(405, mvc.perform(req(get("/auth/login"))).andReturn().getResponse().getStatus());
+    assertEquals(404, mvc.perform(req(post("/oauth2/authorization/zitadel"))).andReturn().getResponse().getStatus());
+    assertEquals(403, mvc.perform(req(post("/auth/login"))).andReturn().getResponse().getStatus());
+    assertEquals(403, mvc.perform(req(post("/auth/login")).with(r -> {r.removeHeader("Origin"); return r;})).andReturn().getResponse().getStatus());
+    assertEquals(403, mvc.perform(req(post("/auth/login")).with(r -> {r.removeHeader("X-Irv-Ingress-Key"); return r;})).andReturn().getResponse().getStatus());
+  }
+
+  @Test void signupAvailabilityIsLoggedWithoutCredentialValues() throws Exception {
+    try (AuditCapture logs = new AuditCapture()) {
+      assertEquals(200, mvc.perform(req(get("/auth/status"))).andReturn().getResponse().getStatus());
+      logs.has("signup_availability", "passed", "valid");
+      logs.excludes("test-token", SECRET, FP);
     }
   }
 

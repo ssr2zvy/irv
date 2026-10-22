@@ -76,7 +76,9 @@ public class ApplicationBoundaryConfiguration {
     result.put("checks", checks); result.put("overall", bound != null ? "Authenticated" : "Authentication incomplete");
     result.put("checkedAt", java.time.Instant.now().toString());
     result.put("sandboxAccessEnabled", false);
-    result.put("signupEnabled", settings.enrollmentEnabled);
+    AuthAudit.Reason signupReason = settings.signupAvailability(java.time.Instant.now());
+    audit(Stage.SIGNUP_AVAILABILITY, signupReason == Reason.VALID ? Outcome.PASSED : Outcome.FAILED, signupReason);
+    result.put("signupEnabled", signupReason == Reason.VALID);
     result.put("certificateRequired", settings.certificateRequired);
     if (bound != null) {
       result.put("idleExpiresAt", bound.activity().plus(BoundSessions.IDLE).toString());
@@ -172,8 +174,8 @@ public class ApplicationBoundaryConfiguration {
             }
           } else if (request.getLocalPort() == 8081 && Set.of(
               "/auth/signup", "/auth/signup/resume", "/auth/csrf", "/auth/protected", "/auth/activity", "/auth/logout",
-              "/oauth2/authorization/zitadel", "/login/oauth2/code/zitadel").contains(path)) {
-            boolean post = Set.of("/auth/signup", "/auth/signup/resume", "/auth/activity", "/auth/logout", "/oauth2/authorization/zitadel").contains(path);
+              "/auth/login", "/login/oauth2/code/zitadel").contains(path)) {
+            boolean post = Set.of("/auth/signup", "/auth/signup/resume", "/auth/activity", "/auth/logout", "/auth/login").contains(path);
             if (!(post ? "POST" : "GET").equals(request.getMethod())) {
               audit(Stage.ROUTE, Outcome.FAILED, Reason.METHOD_NOT_ALLOWED);
               response.setStatus(405); return;
