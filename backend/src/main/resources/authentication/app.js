@@ -11,6 +11,7 @@ const messages = {
   invalid_subject: 'The provider returned an invalid account identifier.'
 };
 let busy = false, authenticated = false, activityAt = 0;
+const home = document.body.dataset.page === "login";
 const message = document.getElementById('message');
 const error = new URL(location.href).searchParams.get('auth_error');
 if (error) {
@@ -37,9 +38,15 @@ async function refresh() {
     const data = await response.json();
     if (!Array.isArray(data.checks) || typeof data.authenticated !== 'boolean') throw new Error('Invalid report');
     authenticated = data.authenticated;
-    document.getElementById("signup-section").hidden = authenticated || !data.signupEnabled;
-    const list = document.getElementById('checks'); list.replaceChildren();
-    for (const check of data.checks) {
+    const signup = document.getElementById('signup-section');
+    if (signup) signup.hidden = authenticated || !data.signupEnabled;
+    if (home) {
+      document.getElementById('signup-unavailable').hidden = authenticated || data.signupEnabled;
+      document.getElementById('signed-in-message').hidden = !authenticated;
+    }
+    document.getElementById('login').disabled = false;
+    const list = document.getElementById('checks'); list?.replaceChildren();
+    for (const check of (list ? data.checks : [])) {
       const item = document.createElement('li');
       const title = document.createElement('strong'); title.textContent = check.label;
       const badge = document.createElement('span');
@@ -48,8 +55,8 @@ async function refresh() {
       const detail = document.createElement('p'); detail.textContent = check.detail;
       item.append(title, badge, detail); list.append(item);
     }
-    document.getElementById('overall').textContent = data.overall;
-    document.getElementById('freshness').textContent = 'Checked: ' + new Date(data.checkedAt).toLocaleTimeString();
+    document.getElementById('overall').textContent = home ? (authenticated ? 'Signed in' : 'Sign in') : data.overall;
+    document.getElementById('freshness').textContent = home ? '' : 'Checked: ' + new Date(data.checkedAt).toLocaleTimeString();
     document.getElementById('expiry').textContent = authenticated
       ? 'Idle expiry: ' + new Date(data.idleExpiresAt).toLocaleTimeString() + ' · Absolute expiry: ' + new Date(data.absoluteExpiresAt).toLocaleTimeString()
       : '';
@@ -57,12 +64,16 @@ async function refresh() {
     authenticated = false;
     document.getElementById('overall').textContent = 'Current status unavailable';
     document.getElementById('freshness').textContent = 'Could not verify this request.';
-    document.getElementById('checks').replaceChildren();
+    document.getElementById('checks')?.replaceChildren();
+    document.getElementById('login').disabled = true;
+    const signup = document.getElementById('signup-section');
+    if (signup) signup.hidden = true;
+    if (home) document.getElementById('signed-in-message').hidden = true;
     document.getElementById('expiry').textContent = '';
   } finally {
     document.getElementById('login').hidden = authenticated;
     document.getElementById('logout').hidden = !authenticated;
-    document.getElementById('probe').hidden = !authenticated;
+    const probe = document.getElementById('probe'); if (probe) probe.hidden = !authenticated;
     clearTimeout(timeout); busy = false;
   }
 }
@@ -79,7 +90,7 @@ document.getElementById('logout').addEventListener('click', async () => {
   catch (_) { message.textContent = 'Sign-out could not be confirmed.'; }
   await refresh();
 });
-document.getElementById('probe').addEventListener('click', async () => {
+document.getElementById('probe')?.addEventListener('click', async () => {
   try {
     const r = await fetch('/auth/protected', {cache: 'no-store', credentials: 'same-origin'});
     message.textContent = r.ok ? 'Protected backend request passed the configured authentication checks.' : 'Protected backend request denied.';
@@ -94,7 +105,7 @@ async function activity(event) {
 }
 document.addEventListener('pointerdown', activity);
 document.addEventListener('keydown', activity);
-document.getElementById('refresh').addEventListener('click', refresh);
+document.getElementById('refresh')?.addEventListener('click', refresh);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 refresh();
 setInterval(() => { if (!document.hidden) refresh(); }, 15000);
@@ -106,7 +117,7 @@ function showEnrollment(data) {
   const link = document.getElementById('enrollment-link'); link.href = url.href; link.hidden = false;
   document.getElementById('enrollment-message').textContent = 'Account created. Open passkey setup below; then return here to sign in. Do not share the setup link.';
 }
-document.getElementById('signup-form').addEventListener('submit', async event => {
+document.getElementById('signup-form')?.addEventListener('submit', async event => {
   event.preventDefault(); if (enrolling) return;
   enrolling = true; document.getElementById('signup').disabled = true;
   const status = document.getElementById('enrollment-message'); status.textContent = 'Creating your account…';
@@ -120,7 +131,7 @@ document.getElementById('signup-form').addEventListener('submit', async event =>
   } catch (e) { status.textContent = e.message || 'Registration could not be confirmed. Try Resume passkey setup before submitting another invite.'; }
   finally { enrolling = false; document.getElementById('signup').disabled = false; }
 });
-document.getElementById('resume-enrollment').addEventListener('click', async () => {
+document.getElementById('resume-enrollment')?.addEventListener('click', async () => {
   try {
     const r = await post('/auth/signup/resume'); const data = await r.json();
     if (!r.ok) throw new Error(data.error || 'Cannot resume enrollment.'); showEnrollment(data);

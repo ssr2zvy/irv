@@ -21,7 +21,6 @@ import org.springframework.context.annotation.*;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.oauth2.client.registration.*;
 import org.springframework.security.oauth2.core.*;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.*;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -30,7 +29,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
     "IRV_AUTH_INGRESS_SECRET=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "IRV_TUNNEL_ENABLED=false", "IRV_AUTH_ENROLLMENT_ENABLED=true", "IRV_ZITADEL_ENROLLMENT_TOKEN=test-token"})
 @AutoConfigureMockMvc
-@ActiveProfiles("auth-only")
 @Import(ZitadelFlowTest.ProviderConfig.class)
 class ZitadelFlowTest {
   static final String SECRET = "a".repeat(64), FP = "b".repeat(64), OTHER = "c".repeat(64);
@@ -147,7 +145,7 @@ class ZitadelFlowTest {
     return session;
   }
 
-  // Exercise the real security chain without the separate auth-only feature boundary.
+  // Exercise the real security chain without the feature boundary.
   // No production matcher names this controller's routes.
   @org.springframework.web.bind.annotation.RestController
   static class FutureEndpoint {

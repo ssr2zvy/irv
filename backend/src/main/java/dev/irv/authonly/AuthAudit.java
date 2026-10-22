@@ -34,7 +34,7 @@ final class AuthAudit {
   static final ThreadLocal<Context> CURRENT = new ThreadLocal<>();
   private static final ObjectMapper JSON = new ObjectMapper();
   private static final org.slf4j.Logger LOG = LoggerFactory.getLogger("irv.auth.audit");
-  private static final Set<String> ROUTES = Set.of("/", "/api/health", "/auth/status", "/auth/app.js",
+  private static final Set<String> ROUTES = Set.of("/", "/api/health", "/auth/status", "/auth/diagnostics", "/auth/app.js",
       "/auth/style.css", "/auth/csrf", "/auth/protected", "/auth/activity", "/auth/logout",
       "/auth/signup", "/auth/signup/resume", "/oauth2/authorization/zitadel", "/login/oauth2/code/zitadel");
 

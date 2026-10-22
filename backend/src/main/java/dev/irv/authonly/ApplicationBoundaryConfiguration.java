@@ -21,24 +21,21 @@ import org.springframework.core.Ordered;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ClassPathResource;
 
-/** Isolated diagnostic runtime with a terminal route allowlist and a separate internal health port. */
+/** Mandatory admission boundary in every profile; unfinished routes remain inaccessible. */
 @Configuration(proxyBeanMethods = false)
-@Profile("auth-only")
-public class AuthOnlyConfiguration {
+public class ApplicationBoundaryConfiguration {
   private final AuthSettings settings;
   private final CertificateGate gate;
   private final BoundSessions sessions;
   private final boolean tunnelEnabled;
 
-  public AuthOnlyConfiguration(Environment env, AuthSettings settings, CertificateGate gate, BoundSessions sessions) {
-    if (!Set.of(env.getActiveProfiles()).equals(Set.of("auth-only")))
-      throw new IllegalStateException("Use auth-only as the sole active profile");
+  public ApplicationBoundaryConfiguration(Environment env, AuthSettings settings, CertificateGate gate, BoundSessions sessions) {
     this.settings = settings; this.gate = gate; this.sessions = sessions;
     tunnelEnabled = Boolean.parseBoolean(env.getProperty("IRV_TUNNEL_ENABLED", "false"));
   }
 
   @Bean
-  WebServerFactoryCustomizer<TomcatServletWebServerFactory> authDiagnosticConnector() {
+  WebServerFactoryCustomizer<TomcatServletWebServerFactory> applicationConnector() {
     return factory -> {
       Connector connector = new Connector(TomcatServletWebServerFactory.DEFAULT_PROTOCOL);
       connector.setPort(8081);
@@ -75,8 +72,8 @@ public class AuthOnlyConfiguration {
         check("session", "Current authenticated session", pending,
             "5-minute idle and 8-hour absolute expiry. Background checks do not extend it."));
     Map<String, Object> result = new LinkedHashMap<>();
-    result.put("mode", "auth-only"); result.put("authenticated", bound != null);
-    result.put("checks", checks); result.put("overall", bound != null ? "Authenticated diagnostic session" : "Authentication incomplete");
+    result.put("authenticated", bound != null);
+    result.put("checks", checks); result.put("overall", bound != null ? "Authenticated" : "Authentication incomplete");
     result.put("checkedAt", java.time.Instant.now().toString());
     result.put("sandboxAccessEnabled", false);
     result.put("signupEnabled", settings.enrollmentEnabled);
@@ -107,11 +104,11 @@ public class AuthOnlyConfiguration {
   }
 
   @Bean
-  FilterRegistrationBean<jakarta.servlet.Filter> authOnlyBoundary(ObjectMapper mapper)
+  FilterRegistrationBean<jakarta.servlet.Filter> applicationBoundary(ObjectMapper mapper)
       throws IOException {
     Map<String, byte[]> assets = new HashMap<>();
-    for (String name : List.of("index.html", "app.js", "style.css")) {
-      try (var input = new ClassPathResource("auth-only/" + name).getInputStream()) {
+    for (String name : List.of("index.html", "diagnostics.html", "app.js", "style.css")) {
+      try (var input = new ClassPathResource("authentication/" + name).getInputStream()) {
         assets.put(name, input.readAllBytes());
       }
     }
@@ -151,16 +148,20 @@ public class AuthOnlyConfiguration {
             response.setStatus(healthy ? 200 : 503);
             body = mapper.writeValueAsBytes(Map.of("status", healthy ? "ok" : "unavailable"));
           } else if (request.getLocalPort() == 8081
-              && Set.of("/", "/auth/status", "/auth/app.js", "/auth/style.css").contains(path)) {
+              && Set.of("/", "/auth/diagnostics", "/auth/status", "/auth/app.js", "/auth/style.css").contains(path)) {
             if (!read) {
               audit(Stage.ROUTE, Outcome.FAILED, Reason.METHOD_NOT_ALLOWED);
               response.setStatus(405);
               response.setHeader("Allow", "GET, HEAD");
               return;
             }
+            if (gate.approved(request) == null) {
+              sessions.current(request);
+              response.setStatus(403); return;
+            }
             if (path.equals("/auth/status")) body = mapper.writeValueAsBytes(report(request));
             else {
-              String name = path.equals("/") ? "index.html" : path.substring("/auth/".length());
+              String name = path.equals("/") ? "index.html" : path.equals("/auth/diagnostics") ? "diagnostics.html" : path.substring("/auth/".length());
               body = assets.get(name);
               type =
                   name.endsWith("html")

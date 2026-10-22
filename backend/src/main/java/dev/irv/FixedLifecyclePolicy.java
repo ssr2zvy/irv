@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import static dev.irv.Util.*;
 
@@ -8,7 +7,7 @@ import java.util.Map;
 import org.springframework.stereotype.Component;
 
 /** Deterministic idle policy. It never trains a model or selects a cheaper lifecycle state. */
-@Profile("!auth-only")
+@DeferredFeature
 @Component
 public class FixedLifecyclePolicy {
   public static final long IDLE_MILLIS = 300_000;

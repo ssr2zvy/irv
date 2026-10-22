@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import static dev.irv.Util.*;
 
@@ -9,7 +8,7 @@ import jakarta.servlet.http.*;
 import java.util.*;
 import org.springframework.web.bind.annotation.*;
 
-@Profile("!auth-only")
+@DeferredFeature
 @RestController
 @RequestMapping("/api")
 public class SandboxApi {

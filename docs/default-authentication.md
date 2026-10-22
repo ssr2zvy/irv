@@ -1,11 +1,11 @@
 # Default authentication policy
 
-The active profile remains `auth-only`. No commented code is uncommented, no
-sandbox/terminal/preview is enabled, and deployment settings are unchanged.
+Authentication is mandatory in every profile. Sandbox/terminal/preview features
+remain disabled. See [mandatory authentication](mandatory-authentication.md).
 
 Two independent controls apply:
 
-1. `AuthOnlyConfiguration` remains a terminal route allowlist. Unknown routes
+1. `ApplicationBoundaryConfiguration` remains a terminal route allowlist. Unknown routes
    return 404 even for an authenticated user. Health is served only on port 8080;
    the diagnostic UI and narrowly listed auth routes use loopback port 8081.
 2. `ZitadelSecurity` applies `BoundSessionAuthorization` to **any request** reaching
@@ -19,8 +19,8 @@ Two independent controls apply:
 | `/oauth2/authorization/zitadel` | POST | Same ingress, Origin and CSRF |
 | `/auth/signup`, `/auth/signup/resume` | POST | Same ingress, Origin and CSRF; signup requires invite |
 
-The boundary directly serves `/`, `/auth/app.js`, `/auth/style.css` and
-`/auth/status` for GET/HEAD. These are explicit pre-login diagnostic exceptions;
+The boundary directly serves `/`, `/auth/diagnostics`, `/auth/app.js`, `/auth/style.css` and
+`/auth/status` for GET/HEAD after trusted-ingress and certificate admission. These are explicit pre-login exceptions;
 status exposes no token, certificate fingerprint or account identity. The
 internal `/api/health` GET/HEAD exception is not exposed on port 8081.
 
@@ -32,18 +32,15 @@ exact application Origin, and Spring's CSRF protection remains enabled. A bearer
 JWT or a Spring authentication object without its valid bound session is
 insufficient. The check does not extend idle expiry.
 
-Outside `auth-only`, the former legacy permit-all chain now denies every request.
-No fallback login or legacy endpoint is made available by selecting another
-profile. This intentionally changes the inactive legacy HTTP behavior; it does
-not migrate those features or make that profile usable. The current health port
-and deployment profile are unchanged.
+The same authentication chain and route boundary apply regardless of profiles.
+Unfinished legacy components are explicitly deferred in every profile.
 
 ## When implementing features later
 
 Keep the default manager as the catch-all when replacing the diagnostic route
 boundary with application routing. Reuse it in the future runtime; do not restore
 the old permit-all fallback. Registering a controller is not permission to expose
-it in today's auth-only runtime. New public exceptions require explicit review;
+it in the current runtime. New public exceptions require explicit review;
 do not add wildcard exceptions or a higher-priority unauthenticated chain.
 
 Authentication does not infer resource ownership: sandbox operations must resolve

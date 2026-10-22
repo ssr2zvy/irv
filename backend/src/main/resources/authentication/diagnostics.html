@@ -1,24 +1,11 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>irv · Authentication diagnostics</title><link rel="stylesheet" href="/auth/style.css"><script src="/auth/app.js" defer></script></head>
-<body><main><header><p class="eyebrow">IRV / AUTH-ONLY</p><h1>Authentication diagnostics</h1><p>Current authentication checks. Sandbox features remain disabled.</p></header>
+<body><main><header><a href="/">Back to sign in</a><p class="eyebrow">IRV</p><h1>Authentication diagnostics</h1><p>Current authentication checks. Sandbox features remain disabled.</p></header>
 <section aria-labelledby="overall"><h2 id="overall">Checking connection…</h2><p id="freshness" role="status">Waiting for the backend.</p><p id="message" role="alert"></p>
 <button id="login" type="button">Sign in with a passkey</button> <button id="logout" type="button" hidden>Sign out</button> <button id="refresh" type="button">Refresh checks</button> <button id="probe" type="button" hidden>Test protected backend request</button>
 <p id="expiry"></p><form id="login-form" method="post" action="/oauth2/authorization/zitadel" hidden></form>
 </section>
-<section id="signup-section" hidden><h2>Create an account</h2>
-<p>Use your invite, choose a username, then enroll a passkey with ZITADEL. Email is a separate contact field, not your account identifier or proof of mailbox ownership.</p>
-<form id="signup-form">
-<label>Invite code <input name="invite" required minlength="43" maxlength="128" autocomplete="off"></label>
-<label>Username <input name="username" required minlength="3" maxlength="32" pattern="[a-z0-9][a-z0-9_.-]{2,31}" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
-<label>Email <input name="email" type="email" required maxlength="200" autocomplete="email"></label>
-<label>Given name <input name="givenName" required maxlength="100" autocomplete="given-name"></label>
-<label>Family name <input name="familyName" required maxlength="100" autocomplete="family-name"></label>
-<button id="signup" type="submit">Create account</button>
-</form>
-<p id="enrollment-message" role="status"></p><a id="enrollment-link" hidden target="_blank" rel="noopener noreferrer">Set up your passkey in ZITADEL</a>
-<p>After saving your passkey, return to this tab and select Sign in. Your irv session starts only after a verified login.</p>
-<button id="resume-enrollment" type="button">Resume passkey setup</button>
-</section><section aria-labelledby="checks-title"><h2 id="checks-title">Live checks</h2><ol id="checks"></ol><noscript>JavaScript is required for this diagnostic interface. No authentication result is assumed.</noscript></section>
+<section aria-labelledby="checks-title"><h2 id="checks-title">Live checks</h2><ol id="checks"></ol><noscript>JavaScript is required for this diagnostic interface. No authentication result is assumed.</noscript></section>
 <section><h2>Separate verification still required</h2><ul>
 <li>Test direct-origin isolation, forged headers, revoked/expired certificates and copied cookies.</li>
 <li>Test Safari passkey enrollment and fresh authentication, session expiry, CSRF, logout and repeat login. Provider account recovery must not bypass admission or certificate binding.</li>

@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import static dev.irv.Util.*;
 
@@ -12,7 +11,7 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.*;
 import software.amazon.awssdk.services.s3.model.*;
 
-@Profile("!auth-only")
+@DeferredFeature
 @Component
 public class Blobs {
   private final java.util.concurrent.ConcurrentMap<String, Object> locks =

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real HTTP smoke checks for isolated auth runtime and actual servlet cookie attributes."""
+"""Real HTTP smoke checks for mandatory auth across profiles and actual servlet cookie attributes."""
 import argparse, http.client, json, os, pathlib, subprocess, tempfile, time
 p = argparse.ArgumentParser()
 g = p.add_mutually_exclusive_group(required=True)
@@ -12,9 +12,9 @@ def request(port, path, headers=None, method='GET'):
     c = http.client.HTTPConnection('127.0.0.1', port, timeout=3)
     c.request(method, path, headers=headers or {})
     r = c.getresponse(); result = r.status, dict(r.getheaders()), r.read(); c.close(); return result
-for configured in [False, True]:
+for profile, configured in [("", False), ("", True), ("production", True), ("auth-only", True), ("dev,production", True)]:
     env = {k:v for k,v in os.environ.items() if not k.startswith(('IRV_', 'SPRING_', 'DATABASE_', 'S3_', 'AWS_', 'FLY_'))}
-    env.update(SPRING_PROFILES_ACTIVE='auth-only', IRV_TUNNEL_ENABLED='false')
+    env.update(SPRING_PROFILES_ACTIVE=profile, IRV_TUNNEL_ENABLED='false')
     sensitive = [secret, fp, "audit-query-secret", "audit-header-secret", "audit-path-secret"]
     if configured: env.update(IRV_AUTH_INGRESS_SECRET=secret)
     with tempfile.TemporaryDirectory() as work:
@@ -32,18 +32,23 @@ for configured in [False, True]:
             for port, paths in [(8080, ['/', '/auth/status', '/auth/csrf', '/login/oauth2/code/zitadel']),
                                 (8081, ['/api/health', '/api/sandboxes', '/api/login', '/ws', '/agent', '/error'])]:
                 for path in paths: assert request(port, path)[0] == 404, (port, path)
-            for path in ['/', '/auth/app.js', '/auth/style.css']:
-                status, h, body = request(8081, path)
-                assert status == 200 and h['Cache-Control'] == 'no-store'
+            for path in ['/', '/auth/diagnostics', '/auth/app.js', '/auth/style.css', '/auth/status']:
+                assert request(8081, path)[0] == 403
+                status, h, body = request(8081, path, headers)
+                assert status == (200 if configured else 403), (path, status)
+                assert h['Cache-Control'] == 'no-store'
                 assert 'Set-Cookie' not in h
-            status, h, body = request(8081, '/auth/status', headers)
-            report = json.loads(body)
-            assert status == 200 and report['authenticated'] is False and len(report['checks']) == 8
-            if not configured:
-                checks = {check['id']: check for check in report['checks']}
-                assert checks['certificate']['status'] == 'not_configured'
-                assert checks['approval']['status'] == 'not_configured'
-            assert secret.encode() not in body and fp.encode() not in body
+                for bad in [{'X-Irv-Cert-Verified':'false'}, {'X-Irv-Cert-Revoked':'true'}, {'X-Irv-Cert-SHA256':'bad'}]:
+                    assert request(8081, path, {**headers, **bad})[0] == 403
+            if configured:
+                status, h, body = request(8081, '/auth/status', headers)
+                report = json.loads(body)
+                assert report['authenticated'] is False and len(report['checks']) == 8
+                assert secret.encode() not in body and fp.encode() not in body
+                home = request(8081, '/', headers)[2].decode()
+                assert 'class="auth-lock"' in home and 'id="signup-form"' in home
+                assert 'id="checks"' not in home and 'AUTH-ONLY' not in home
+                assert 'id="checks"' in request(8081, '/auth/diagnostics', headers)[2].decode()
             status, h, body = request(8081, '/auth/csrf', headers)
             if configured:
                 assert status == 200

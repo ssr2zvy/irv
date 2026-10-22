@@ -1,13 +1,12 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import java.util.*;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
-@Profile("!auth-only")
+@DeferredFeature
 @RestControllerAdvice
 public class Errors {
   @ExceptionHandler(ResponseStatusException.class)

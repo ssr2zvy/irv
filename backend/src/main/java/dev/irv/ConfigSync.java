@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import static dev.irv.Util.*;
 
@@ -9,7 +8,7 @@ import java.util.*;
 import org.springframework.stereotype.Component;
 
 /** Database-serialized, fenced edit sessions. Never extends a compute lease. */
-@Profile("!auth-only")
+@DeferredFeature
 @Component
 public class ConfigSync {
   final Db db;

@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import static dev.irv.Util.*;
 
@@ -11,7 +10,7 @@ import java.time.*;
 import java.util.*;
 import org.springframework.stereotype.*;
 
-@Profile("!auth-only")
+@DeferredFeature
 @Component
 public class Fly {
   final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();

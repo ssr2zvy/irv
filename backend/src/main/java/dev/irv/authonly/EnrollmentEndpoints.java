@@ -4,13 +4,11 @@ import static dev.irv.authonly.AuthAudit.*;
 
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Map;
-import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 @RestController
-@Profile("auth-only")
 class EnrollmentEndpoints {
   private final Enrollment enrollment;
   EnrollmentEndpoints(Enrollment enrollment) { this.enrollment = enrollment; }

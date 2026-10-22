@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import java.util.*;
 import java.util.function.Supplier;
@@ -8,7 +7,7 @@ import org.springframework.jdbc.core.*;
 import org.springframework.stereotype.*;
 import org.springframework.transaction.support.*;
 
-@Profile("!auth-only")
+@DeferredFeature
 @Component
 public class Db {
   final JdbcTemplate jdbc;
