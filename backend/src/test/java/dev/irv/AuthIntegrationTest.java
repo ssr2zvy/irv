@@ -22,20 +22,20 @@ class AuthIntegrationTest {
 
   @Test void legacyMutationsDeniedEvenWithCsrf() throws Exception {
     for (String action : List.of("register", "login", "enroll", "verify", "logout"))
-      mvc.perform(post("/api/auth/" + action).with(csrf())
+      mvc.perform(post("/api/auth/" + action).with(csrf()).with(r -> {r.setLocalPort(8081); return r;})
           .header("X-Irv-Request", "1").contentType("application/json").content("{}"))
-          .andExpect(status().isForbidden());
+          .andExpect(status().isNotFound());
   }
 
   @Test void legacyCookieAndBearerCannotExposeResources() throws Exception {
     for (String path : List.of("/api/sandboxes", "/api/health", "/future/operation"))
-      mvc.perform(get(path).cookie(new Cookie("irv_session", "old-session"))
+      mvc.perform(get(path).with(r -> {r.setLocalPort(8081); return r;}).cookie(new Cookie("irv_session", "old-session"))
           .header("Authorization", "Bearer old-token"))
-          .andExpect(status().isForbidden());
+          .andExpect(status().isNotFound());
   }
 
   @Test void missingCsrfDenied() throws Exception {
-    mvc.perform(post("/api/auth/login").contentType("application/json").content("{}"))
-        .andExpect(status().isForbidden());
+    mvc.perform(post("/api/auth/login").with(r -> {r.setLocalPort(8081); return r;}).contentType("application/json").content("{}"))
+        .andExpect(status().isNotFound());
   }
 }

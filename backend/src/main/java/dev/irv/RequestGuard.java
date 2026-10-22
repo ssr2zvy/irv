@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import static dev.irv.Util.*;
 
@@ -11,7 +10,7 @@ import java.util.*;
 import org.springframework.stereotype.*;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-@Profile("!auth-only")
+@DeferredFeature
 @Component
 public class RequestGuard extends OncePerRequestFilter {
   final Auth auth;

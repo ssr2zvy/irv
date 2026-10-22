@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import static dev.irv.Util.*;
 
@@ -11,7 +10,7 @@ import org.springframework.stereotype.*;
 import org.springframework.web.socket.*;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 
-@Profile("!auth-only")
+@DeferredFeature
 @Component
 public class Hub extends org.springframework.web.socket.handler.AbstractWebSocketHandler
     implements org.springframework.web.socket.SubProtocolCapable {

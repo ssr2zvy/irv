@@ -25,7 +25,6 @@ import org.springframework.security.web.savedrequest.NullRequestCache;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 
 @Configuration(proxyBeanMethods = false)
-@Profile("auth-only")
 public class ZitadelSecurity {
   @Bean AuthSettings authSettings(Environment env, ObjectMapper mapper) { return new AuthSettings(env, mapper); }
   @Bean(destroyMethod = "close") InviteLedger inviteLedger(AuthSettings settings) { return new InviteLedger(settings); }
@@ -105,7 +104,7 @@ public class ZitadelSecurity {
             .requestMatchers(org.springframework.http.HttpMethod.GET, "/auth/csrf", "/login/oauth2/code/zitadel").permitAll()
             .requestMatchers(org.springframework.http.HttpMethod.POST, "/auth/signup", "/auth/signup/resume", "/oauth2/authorization/zitadel").permitAll()
             // No protected-path list: every new route inherits the same session binding checks.
-            // AuthOnlyConfiguration independently keeps unfinished routes unreachable.
+            // ApplicationBoundaryConfiguration independently keeps unfinished routes unreachable.
             .anyRequest().access(new BoundSessionAuthorization(sessions)))
         .exceptionHandling(c -> c.authenticationEntryPoint((req, res, ex) -> {
               audit(Stage.AUTHORIZATION, Outcome.FAILED, Reason.MISSING_SESSION); res.setStatus(401);

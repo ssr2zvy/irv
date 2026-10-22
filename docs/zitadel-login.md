@@ -43,7 +43,7 @@ cd backend
 mvn -Dtest=dev.irv.authonly.ZitadelFlowTest,dev.irv.authonly.EnrollmentTest test
 mvn -DskipTests package
 cd ..
-python3 scripts/test-auth-only.py --jar backend/target/irv-0.1.0.jar
+python3 scripts/test-auth-boundary.py --jar backend/target/irv-0.1.0.jar
 ```
 
 The full legacy test suite also requires the existing throwaway IRV_ENCRYPTION_KEY and temporary blob directory. See the patch VALIDATION.md for tests actually executed. Tests use a mock identity provider; they do not enroll a real iPhone passkey or mutate ZITADEL.

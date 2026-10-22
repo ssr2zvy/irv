@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import static dev.irv.Util.*;
 
@@ -8,7 +7,7 @@ import java.util.*;
 import org.springframework.boot.*;
 import org.springframework.stereotype.*;
 
-@Profile("!auth-only")
+@DeferredFeature
 @Component
 public class CostAccounting implements ApplicationRunner {
   final Db db;

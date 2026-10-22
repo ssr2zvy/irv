@@ -4,13 +4,11 @@ import static dev.irv.authonly.AuthAudit.*;
 
 import jakarta.servlet.http.*;
 import java.util.Map;
-import org.springframework.context.annotation.Profile;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@Profile("auth-only")
 public class AuthEndpoints {
   private final BoundSessions sessions;
   private final AuthSettings settings;

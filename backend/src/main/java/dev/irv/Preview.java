@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import static dev.irv.Util.*;
 
@@ -13,7 +12,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.*;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-@Profile("!auth-only")
+@DeferredFeature
 @Component
 @Order(-100)
 public class Preview extends OncePerRequestFilter {

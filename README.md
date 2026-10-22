@@ -6,30 +6,18 @@ Invite-only browser development environments, with a Spring Boot control plane, 
 
 **This repository contains implementation source and a runnable application JAR.** Local verification is recorded in `docs/VALIDATION.md`. Live Fly/Tigris/SMS deployment and Docker image builds require your accounts and must pass the included staging tests before production use. No credentials are bundled.
 
-## Quick start: run the app locally
+## Current runtime
 
-Requirements: Java 17+ and Python 3 for generating secrets. Docker Compose is an alternative.
+Authentication is mandatory in every Spring profile, including the default profile.
+See [mandatory authentication](docs/mandatory-authentication.md) for current routes,
+configuration, deployment and checks. `/` is the certificate-admitted sign-in/signup
+page. Its bottom-right lock opens `/auth/diagnostics`.
 
-```sh
-python3 scripts/init_env.py
-# Edit .env: set Fly organization/token and image references when ready to run cloud sandboxes.
-set -a
-. ./.env
-set +a
-java -jar dist/irv.jar
-```
+Sandbox services, the old password/OTP login, old SPA, terminals and previews remain
+disabled. The older feature descriptions below describe deferred implementation,
+not currently exposed routes. Rebuild from source; checked-in JARs and historical
+patch ZIPs are not current runtime artifacts.
 
-Open **http://localhost:8080**. Register a username/password using the `IRV_BOOTSTRAP_INVITE` value in `.env`, then scan the enrollment QR with Microsoft Authenticator or Duo Mobile. Save the recovery codes. No email address is collected. The first invite creates the administrator and expires 24 hours after the first application boot. Remove the bootstrap variable after setup.
-
-The local JAR uses an H2 database under `./data`, and filesystem blob storage if `S3_BUCKET` is empty. This exercises the real app without a database subscription. Sandbox creation still uses Fly; configure the image references and Fly credentials first. To verify without spending on Fly, build from source and run `scripts/local_smoke.py`, which substitutes the provider API. Restricted hosts can additionally select the explicitly documented privilege/transport test fixture.
-
-Alternatively:
-
-```sh
-docker compose up --build
-```
-
-Compose runs PostgreSQL plus the application. Credentials are read from `.env`. Persist the named volumes. The Compose setup does not provision cloud sandboxes until you request one.
 
 ## What is included
 

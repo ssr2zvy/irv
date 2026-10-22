@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>irv · Sign in</title><link rel="stylesheet" href="/auth/style.css"><script src="/auth/app.js" defer></script></head>
+<body data-page="login"><main><header><p class="eyebrow">IRV</p><h1>Welcome to irv</h1><p>Sign in with your passkey or create an account with an invite.</p></header>
+<section aria-labelledby="overall"><h2 id="overall">Sign in</h2><p id="freshness" role="status">Checking your session…</p><p id="message" role="alert"></p>
+<button id="login" type="button" disabled>Sign in with a passkey</button> <button id="logout" type="button" hidden>Sign out</button>
+<p id="expiry"></p><p id="signed-in-message" hidden>You are signed in. Sandbox features are not available yet.</p>
+<form id="login-form" method="post" action="/oauth2/authorization/zitadel" hidden></form></section>
+<section id="signup-section" hidden><h2>Create an account</h2>
+<p>Use your invite, choose a username, then enroll a passkey with ZITADEL. Email is a separate contact field, not your account identifier or proof of mailbox ownership.</p>
+<form id="signup-form">
+<label>Invite code <input name="invite" required minlength="43" maxlength="128" autocomplete="off"></label>
+<label>Username <input name="username" required minlength="3" maxlength="32" pattern="[a-z0-9][a-z0-9_.-]{2,31}" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+<label>Email <input name="email" type="email" required maxlength="200" autocomplete="email"></label>
+<label>Given name <input name="givenName" required maxlength="100" autocomplete="given-name"></label>
+<label>Family name <input name="familyName" required maxlength="100" autocomplete="family-name"></label>
+<button id="signup" type="submit">Create account</button>
+</form>
+<p id="enrollment-message" role="status"></p><a id="enrollment-link" hidden target="_blank" rel="noopener noreferrer">Set up your passkey in ZITADEL</a>
+<p>After saving your passkey, return to this tab and select Sign in. Your irv session starts only after a verified login.</p>
+<button id="resume-enrollment" type="button">Resume passkey setup</button>
+</section>
+<p id="signup-unavailable" hidden>Account creation is not currently enabled. Existing accounts can sign in.</p>
+<noscript>JavaScript is required to sign in or create an account.</noscript>
+</main><a class="auth-lock" href="/auth/diagnostics" aria-label="Authentication status" title="Authentication status"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4"/><path d="M12 14v3"/></svg></a></body></html>

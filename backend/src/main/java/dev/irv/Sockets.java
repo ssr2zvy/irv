@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import static dev.irv.Util.*;
 
@@ -12,7 +11,7 @@ import org.springframework.web.socket.*;
 import org.springframework.web.socket.config.annotation.*;
 import org.springframework.web.socket.server.*;
 
-@Profile("!auth-only")
+@DeferredFeature
 @Configuration
 @EnableWebSocket
 public class Sockets implements WebSocketConfigurer {

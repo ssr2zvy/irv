@@ -1,6 +1,5 @@
 package dev.irv;
 
-import org.springframework.context.annotation.Profile;
 
 import static dev.irv.Util.*;
 
@@ -10,7 +9,7 @@ import java.io.*;
 import java.util.*;
 import org.springframework.web.bind.annotation.*;
 
-@Profile("!auth-only")
+@DeferredFeature
 @RestController
 @RequestMapping("/agent")
 public class AgentApi {

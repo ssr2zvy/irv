@@ -7,7 +7,6 @@ kill_timeout = "60s"
   dockerfile = "ci-cd/Containerfile"
 [env]
   PORT = "8080"
-  SPRING_PROFILES_ACTIVE = "auth-only"
   IRV_DATA_DIR = "/data"
   IRV_BLOB_DIR = "/data/blobs"
   IRV_PUBLIC_ORIGIN = "https://iruvu.space"

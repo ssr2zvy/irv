@@ -1,4 +1,4 @@
-> **Current mode: auth-only.** `fly.toml` now selects the isolated authentication diagnostic runtime. See [auth-only testing](../docs/auth-only-testing.md) for endpoints, trusted certificate forwarding and invite-gated enrollment. Earlier first-deploy database/temporary-page details below describe the prior mode. The single-app tunnel deployment mechanism is unchanged.
+> **Current runtime:** Authentication is mandatory across all profiles. See [mandatory authentication](../docs/mandatory-authentication.md). The default page is signup/sign-in after certificate admission; unfinished sandbox routes remain locked. Historical first-deploy instructions below do not enable those features.
 
 # One Fly app: iruvu
 
@@ -53,7 +53,7 @@ For local Docker use, IRV_TUNNEL_ENABLED defaults to false and preserves Java-on
 
 Separate users, file permissions, and environment separation reduce cross-process exposure. They are not separate-kernel isolation: root/kernel or Fly administration compromise can affect both. Supervisor and initialization are trusted root components.
 
-The auth-only runtime now implements ZITADEL login and certificate-bound diagnostic sessions. Cloudflare enforcement/forwarding and ZITADEL signup credentials must be configured. Automated invite-gated signup is documented in `docs/flow2-enrollment.md`. The real sandbox UI/API remains excluded from this profile.
+The shared runtime implements ZITADEL login and certificate-bound sessions. Cloudflare enforcement/forwarding and ZITADEL signup credentials must be configured. Automated invite-gated signup is documented in `docs/flow2-enrollment.md`. The real sandbox UI/API remains disabled in every profile.
 
 ## Inspect
 
