@@ -94,9 +94,22 @@ class EnrollmentTest {
     verifyProvisioningAndReplay(env().withProperty("IRV_AUTH_INVITES_JSON", "{}")
         .withProperty("IRV_AUTH_INVITE_CODES_JSON", "[{\"code\":\"" + CODE + "\",\"expiresAt\":\"2026-10-17T00:00:00Z\"}]"));
   }
+  @Test void singleSecretProvisionsAndCannotReplayAfterRestart() throws Exception {
+    verifyProvisioningAndReplay(env().withProperty("IRV_AUTH_INVITES_JSON", "{}")
+        .withProperty("IRV_AUTH_INVITE_CODE", CODE));
+  }
+  @Test void expiredSingleSecretNeverCallsProvider() throws Exception {
+    AuthSettings s = new AuthSettings(env().withProperty("IRV_AUTH_INVITES_JSON", "{}")
+        .withProperty("IRV_AUTH_INVITE_CODE", CODE), JSON);
+    Provider provider = new Provider(s);
+    try (InviteLedger ledger = new InviteLedger(s, Clock.fixed(NOW.minusSeconds(7200), ZoneOffset.UTC))) {
+      assertThrows(ResponseStatusException.class, () -> signup(service(s, ledger, provider), request()));
+      assertTrue(provider.paths.isEmpty());
+    }
+  }
   void verifyProvisioningAndReplay(MockEnvironment environment) throws Exception {
     AuthSettings s = new AuthSettings(environment, JSON); Provider p = new Provider(s);
-    try (InviteLedger ledger = new InviteLedger(s)) {
+    try (InviteLedger ledger = new InviteLedger(s, Clock.fixed(NOW, ZoneOffset.UTC))) {
       Enrollment e = service(s, ledger, p); MockHttpServletRequest r = request();
       String link = signup(e, r);
       assertTrue(link.startsWith(AuthSettings.ISSUER + "/ui/v2/login/passkey/set?"));

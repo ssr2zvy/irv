@@ -45,7 +45,7 @@ final class Enrollment {
       { audit(Stage.INPUT, Outcome.FAILED, Reason.INVALID_INPUT); throw error(HttpStatus.BAD_REQUEST, "Check the invite, username, email and name fields."); }
     audit(Stage.INPUT, Outcome.PASSED, Reason.VALID);
     String hash = hash(invite);
-    if (!clock.instant().isBefore(settings.invites.getOrDefault(hash, Instant.EPOCH))) {
+    if (!clock.instant().isBefore(settings.inviteExpiry(hash))) {
       audit(Stage.INVITE, Outcome.FAILED, Reason.INVITE_INVALID_OR_EXPIRED);
       throw error(HttpStatus.FORBIDDEN, "Invite is invalid, expired or already used.");
     }

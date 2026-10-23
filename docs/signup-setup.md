@@ -13,53 +13,47 @@ Open the administrator console for https://irv-instance-4ftbgu.us1.zitadel.cloud
 
 Official references: [service accounts and API access](https://zitadel.com/docs/guides/integrate/zitadel-apis/access-zitadel-apis), [administrator roles](https://zitadel.com/docs/guides/manage/console/administrators).
 
-## 2. Create an invite using a password manager
+## 2. Choose your invite string
 
-Generate a fresh random string of **43–128 ASCII characters**, using only `A–Z`, `a–z`, `0–9`, `_` and `-`. A password manager's random 48-character alphanumeric password works. Do not use a memorable phrase, reuse the ingress secret, or copy a sample code. Validation checks format, not randomness.
+You define the value yourself: **43–128 characters**, using ASCII letters, digits, hyphens (`-`) and underscores (`_`). It is case-sensitive; no spaces, trimming or decoding. Choose an unpredictable value. A password manager is optional; no generator script, JSON, hash or expiry date needs to be supplied.
 
-Choose a future expiry in UTC, ending in `Z`, such as `2026-12-01T00:00:00Z` (replace with your intended future date).
+## 3. Fly secrets for iruvu
 
-## 3. Fly secrets for app iruvu
+After deploying this patch, open **Fly → iruvu → Secrets**.
 
-In the Fly dashboard, open **iruvu → Secrets**. Add/update these three settings, preferably in one save/apply operation:
-
-| Secret name | Value |
+| Secret | Value |
 |---|---|
-| `IRV_ZITADEL_ENROLLMENT_TOKEN` | The literal service-account PAT; no `Bearer ` prefix or surrounding quotes |
-| `IRV_AUTH_INVITE_CODES_JSON` | The full JSON array shown below, with your generated code and expiry substituted |
+| `IRV_ZITADEL_ENROLLMENT_TOKEN` | Your service-account PAT, without a `Bearer ` prefix |
+| `IRV_AUTH_INVITE_CODE` | Your literal chosen invite string, without surrounding quotes |
 | `IRV_AUTH_ENROLLMENT_ENABLED` | `true` |
 
-JSON FORMAT ONLY — replace the placeholder; it is intentionally not a valid invite:
+Remove the old `IRV_AUTH_INVITE_CODES_JSON` and `IRV_AUTH_INVITES_JSON` secrets when switching to this mode. Nonempty JSON invites combined with the new single-code secret intentionally fail startup, preventing old invitations from accidentally remaining active. Empty defaults `[]` and `{}` are harmless. Existing JSON-only configuration remains supported when the single-code secret is absent.
 
-```json
-[
-  {
-    "code": "<PASTE-YOUR-RANDOM-CODE-HERE>",
-    "expiresAt": "2026-12-01T00:00:00Z"
-  }
-]
-```
+Apply the changes together if possible. If editing secrets individually: set enrollment to `false`, remove the old invite settings, add the PAT and single-code secret, then set enrollment to `true` last. Each applied update restarts the app and signs current users out. No further source deployment is necessary to rotate a code.
 
-Paste JSON directly as the secret value, without Markdown fences or outer shell quotes. If the dashboard saves one secret at a time, explicitly set enrollment to `false` first, add token and invites, then set it to `true` last. Apply the changes so the Machine restarts with the new environment. Every restart signs existing users out.
+Keep the existing Cloudflare certificate/header rules, `TUNNEL_TOKEN`, `IRV_AUTH_INGRESS_SECRET`, and mounted `/data` volume. No signup secret goes into Cloudflare.
 
-Existing `TUNNEL_TOKEN`, `IRV_AUTH_INGRESS_SECRET` and Cloudflare header/certificate rules stay as configured. Keep the existing `/data` volume and `/data/auth/invites` ledger; no new database or volume is required. No signup secret belongs in Cloudflare. Authentication applies in all profiles.
+## 4. What the application does automatically
 
-`IRV_AUTH_INVITES_JSON` remains the optional legacy hash-to-expiry object. Both settings can coexist, with at most 1000 distinct invites combined. The same code in both formats must have exactly the same expiry instant; conflicting expiries fail startup. When migrating, retain any other unused hashed invitations or intentionally withdraw them. Removing a code from only one setting does not withdraw it if the other still contains its hash.
+- Hashes your exact string with SHA-256; the application lookup and ledger use its hash.
+- Gives a new code **2 hours from its first enabled application startup**. It records that fixed expiry in `/data/auth/invites`.
+- Redeploying, restarting, disabling and re-enabling signup, or removing and re-adding the same code does not restart its expiry.
+- Reserves it at the beginning of account provisioning. Only one signup can claim it; restart/deployment cannot make it reusable.
+- A different code gets its own 2-hour window when loaded by an enabled app. The previous code stops being accepted once the new configuration is applied.
+- A previously consumed code remains consumed even when migrated from JSON configuration. An unused JSON code moved into single-code mode begins its first automatic 2-hour window; use a fresh string for a new invitation.
 
-## 4. Use the invite
+You do not need to remove a consumed code. To invite another person, replace it with a different string and apply the secret update. To withdraw an unused invitation early, remove the secret or set enrollment to `false` and apply. To renew an expired invitation, choose a different string.
 
-1. Open https://iruvu.space with your approved certificate.
-2. Choose **Create account** and enter the original invite code, username, email, given name and family name.
-3. Open **Set up passkey** and finish ZITADEL enrollment.
-4. Return to irv and choose **Sign in**. The button starts the existing hosted ZITADEL login flow. ZITADEL may first request a username/account choice before the passkey prompt.
-5. Use the bottom-right lock to view authentication status. Successful enrollment alone does not create a signed-in irv session. Other application endpoints remain locked.
+## 5. Sign up
 
-## Subsequent invites and troubleshooting
+Open https://iruvu.space with your approved certificate, choose **Create account**, and enter the **same original string** plus the account details. Complete **Set up passkey** at ZITADEL, return to irv, and select **Sign in**. The provider may request an account/username before its passkey prompt. Use the bottom-right lock to inspect authentication status. Enrollment itself does not create an authenticated irv session. Other unfinished application endpoints remain locked.
 
-Add another object to the JSON array and preserve other unused entries. Give the new original code privately to the intended person. Replacing a secret replaces its whole list. Removing entries withdraws unused invites; re-adding or extending a consumed code never makes it usable again. Generate a different code for a new invitation.
+## Troubleshooting and persistence
 
-The backend converts codes to SHA-256 hashes at startup and stores only hashes in its invite lookup and durable redemption ledger. Plaintext remains in Fly's secret/environment configuration; anyone with access to those values can read an unused code. It is never intentionally included in application logs or parser exception chains.
+Malformed settings fail startup without displaying secret values. A missing provider token, absent invite, expired invite or explicit disable prevents signup availability. Inspect the safe `signup_availability` audit event for configuration problems. The button's visibility does not prove provider permissions or that a configured invite remains unused; the backend always enforces the durable reservation.
 
-Malformed configuration fails startup with a setting-specific, value-free error. Expired invites do not enable signup. If Create account is absent, check the backend `signup_availability` audit event: provider token missing, invites not configured, invites expired, or enrollment disabled. Availability does not prove provider credentials work or that every listed invite is unused.
+A provisioning failure may leave the invite reserved because a provider account might already exist. Review the account and audit stage; do not erase the ledger to retry. Preserve the single existing Machine and `/data` volume across deployments. Independent ledgers, deleting the volume, or restoring an old backup invalidate the persistent single-use/expiry guarantees.
 
-A provider failure can leave an invite reserved for review because an account may already have been created. Inspect the safe audit stage and review the user in ZITADEL; do not delete the ledger or repeatedly retry the same invitation. This patch does not validate live provider permissions, provider policy, or Safari passkeys automatically. The first real signup is the end-to-end check.
+The original string remains readable to anyone with access to Fly's secret/environment values; the backend does not log it. Hashing does not strengthen a predictable string. First live signup, ZITADEL permissions and Safari passkey behavior still require verification after deployment.
+
+Existing 24-hour single-code records are shortened once to two hours from their original activation. Codes already older than two hours immediately expire. Consumed codes remain consumed.

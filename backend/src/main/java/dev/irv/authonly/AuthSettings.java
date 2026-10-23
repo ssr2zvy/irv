@@ -13,7 +13,9 @@ public final class AuthSettings {
   public static final String PROJECT = "395285999653022010";
   public static final String ORG = "395285989452532411";
   public static final String ROLE = "irv_user";
-  final String ingressSecret, enrollmentToken, inviteDb;
+  final String ingressSecret, enrollmentToken, inviteDb, singleInviteHash;
+  // Published by the durable ledger before enrollment can serve requests.
+  volatile java.time.Instant singleInviteExpiry = java.time.Instant.EPOCH;
   final boolean certificateRequired, enrollmentEnabled, enrollmentExplicitlyDisabled;
   final Map<String, java.time.Instant> invites;
 
@@ -57,9 +59,15 @@ public final class AuthSettings {
           + "codes must be 43-128 letters, digits, underscores or hyphens; maximum 1000 combined invites; "
           + "duplicate codes must have identical expiry");
     }
+    String singleCode = env.getProperty("IRV_AUTH_INVITE_CODE", "");
+    if (!singleCode.isEmpty() && !singleCode.matches("[A-Za-z0-9_-]{43,128}"))
+      throw new IllegalStateException("IRV_AUTH_INVITE_CODE must be 43-128 letters, digits, underscores or hyphens");
+    singleInviteHash = singleCode.isEmpty() ? "" : Enrollment.hash(singleCode);
+    if (!singleInviteHash.isEmpty() && !parsed.isEmpty())
+      throw new IllegalStateException("Use IRV_AUTH_INVITE_CODE or JSON invites, not both; remove old JSON invite secrets");
     invites = Map.copyOf(parsed);
     enrollmentExplicitlyDisabled = "false".equals(env.getProperty("IRV_AUTH_ENROLLMENT_ENABLED"));
-    enrollmentEnabled = flag(env, "IRV_AUTH_ENROLLMENT_ENABLED", !enrollmentToken.isBlank() && !invites.isEmpty());
+    enrollmentEnabled = flag(env, "IRV_AUTH_ENROLLMENT_ENABLED", !enrollmentToken.isBlank() && (!invites.isEmpty() || !singleInviteHash.isEmpty()));
     if (enrollmentEnabled && (enrollmentToken.isBlank() || enrollmentToken.chars().anyMatch(Character::isWhitespace)))
       throw new IllegalStateException("Enrollment requires IRV_ZITADEL_ENROLLMENT_TOKEN");
     if (!inviteDb.matches("/[a-zA-Z0-9_./-]+") || inviteDb.contains(".."))
@@ -68,11 +76,18 @@ public final class AuthSettings {
   AuthAudit.Reason signupAvailability(java.time.Instant now) {
     if (enrollmentExplicitlyDisabled) return AuthAudit.Reason.ENROLLMENT_DISABLED;
     if (enrollmentToken.isBlank()) return AuthAudit.Reason.PROVIDER_TOKEN_MISSING;
+    if (!singleInviteHash.isEmpty())
+      return now.isBefore(singleInviteExpiry) ? AuthAudit.Reason.VALID : AuthAudit.Reason.INVITES_EXPIRED;
     if (invites.isEmpty()) return AuthAudit.Reason.INVITES_NOT_CONFIGURED;
     if (invites.values().stream().noneMatch(now::isBefore)) return AuthAudit.Reason.INVITES_EXPIRED;
     return AuthAudit.Reason.VALID;
   }
   boolean signupAvailable(java.time.Instant now) { return signupAvailability(now) == AuthAudit.Reason.VALID; }
+
+  java.time.Instant inviteExpiry(String hash) {
+    return !singleInviteHash.isEmpty() && singleInviteHash.equals(hash)
+        ? singleInviteExpiry : invites.getOrDefault(hash, java.time.Instant.EPOCH);
+  }
 
   private static boolean flag(Environment env, String name, boolean fallback) {
     String value = env.getProperty(name, Boolean.toString(fallback));

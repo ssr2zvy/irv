@@ -21,6 +21,7 @@ Keep the existing single Fly Machine, /data volume, tunnel token, ingress secret
 | IRV_AUTH_CERT_REQUIRED | Defaults true; keep true now |
 | IRV_AUTH_ENROLLMENT_ENABLED | Optional override: false disables signup; when omitted, a configured provider token and invites enable it automatically |
 | IRV_ZITADEL_ENROLLMENT_TOKEN | New dedicated, expiring ZITADEL service-account PAT with ORG_USER_MANAGER membership ONLY in irv-users (395285989452532411) |
+| IRV_AUTH_INVITE_CODE | Recommended: your literal 43–128 character code; automatic persistent 2-hour expiry and single use; no JSON. See [signup setup](signup-setup.md). |
 | IRV_AUTH_INVITE_CODES_JSON | JSON array of plaintext code/UTC expiresAt entries; backend hashes codes automatically. See [signup setup](signup-setup.md). |
 | IRV_AUTH_INVITES_JSON | JSON object mapping SHA256 of each high-entropy invite to its ISO UTC expiry |
 | IRV_AUTH_INVITE_DB | Defaults /data/auth/invites, the file prefix for the durable H2 ledger |
@@ -35,7 +36,7 @@ Set the token and invite JSON through the existing Fly Secrets interface on iruv
 
 ## Configure invites without a script
 
-Use `IRV_AUTH_INVITE_CODES_JSON` as described in [signup setup](signup-setup.md). It accepts random password-manager strings, hashes them at startup and shares the existing durable single-use ledger. Hash-only invites below remain supported.
+Use `IRV_AUTH_INVITE_CODE` as described in [signup setup](signup-setup.md). Supply your own unpredictable string; the backend hashes it and persists its 2-hour expiry on first enabled startup. Restarting does not renew it. Remove nonempty JSON invite settings when using this mode. The older JSON formats remain available as an alternative, not alongside the single-code secret.
 
 ## Optional script: generate and issue a hash-only invite
 
